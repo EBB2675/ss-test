@@ -11,7 +11,7 @@ npm run dev -- --host 0.0.0.0 --port 5173
 # Requires Node 20.19+ (or 22.12+) for Vite.
 ```
 
-The repo root provides `./dev.sh` to start both backend (**5179**) and frontend (**5173**) together after verifying environment variables.
+Run the backend separately with `schema-studio` (port **5179**; see the root README).
 
 ## Environment defaults
 
@@ -25,9 +25,8 @@ These Vite env vars (see `App.tsx`) control the initial workspace:
 
 ## Notable UI features
 
-- Diagram builder for the working tree or a selected branch (`/schema` vs `/graph`).
-- Branch comparison banner using `/graph/diff`.
-- Overview mode listing packages/classes by branch.
+- Diagram builder for a module of the selected schema (`/schema`).
+- Overview mode listing the schema's packages and classes.
 - Editable mode to add classes (inheritance or subsection links), add/rename/remove quantities and, for bam-masterdata, properties and vocabulary terms. Every change is stored on the server through `/schema/edits` as an edit of the LinkML schema; the server returns the graph rebuilt from the edited schema.
 - Doc panel + under-the-hood panel for docstrings and normalization helpers.
 - Export buttons for JSON and PDF (PNG-backed via `GraphView` `toPng`).
@@ -35,10 +34,10 @@ These Vite env vars (see `App.tsx`) control the initial workspace:
 
 ## Key files
 
-- `src/App.tsx` — sidebar controls, API calls, diff handling, overview toggle, export + editable mode wiring.
+- `src/App.tsx` — sidebar controls, API calls, overview toggle, export + editable mode wiring.
 - `src/client.ts` — the only module that talks to the backend: over HTTP, or in a static build to `src/static/backend.ts`.
 - `src/static/` — the static site's backend in the browser, edit store and the web worker running the Python core with Pyodide.
-- `src/GraphView.tsx` — Cytoscape renderer with ELK layout, diff overlays, export handle.
+- `src/GraphView.tsx` — Cytoscape renderer with ELK layout and export handle.
 - `src/components/DocPanel.tsx` — class/quantity docs with inline edit/remove when editable.
 - `src/components/OverviewGrid.tsx` — bird’s-eye packages/classes table.
 - `src/components/UnderTheHoodPanel.tsx` — normalize/helper list from `/usage`.
@@ -49,7 +48,7 @@ These Vite env vars (see `App.tsx`) control the initial workspace:
 
 GitHub Pages builds open schemas in the **New editor**, a React Flow canvas using
 that same browser schema engine and edit store. Use **Classic** to compare the old
-canvas. Dev Mode keeps its existing renderer.
+canvas.
 
 - Double-click a class title to rename it (Enter saves, Escape cancels).
 - Double-click an owned quantity to edit its name, type and description.

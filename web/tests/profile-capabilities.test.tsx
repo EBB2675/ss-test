@@ -47,8 +47,6 @@ describe('profile capabilities', () => {
     useWorkspaceStore.getState().setPkg('pkg');
     useWorkspaceStore.getState().setBaseNamespace('pkg');
     useWorkspaceStore.getState().setStartEmpty(true);
-    window.localStorage.setItem('schema-uml-token', 't0k');
-    window.localStorage.setItem('schema-uml-username', 'user');
   });
 
   afterEach(() => cleanup());

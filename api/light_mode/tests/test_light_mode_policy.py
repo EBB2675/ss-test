@@ -106,13 +106,6 @@ async def test_workspace_update_accepts_json_body_and_switches_profile(client: h
 
 
 @pytest.mark.anyio
-async def test_git_branches_is_hard_disabled(client: httpx.AsyncClient):
-    resp = await client.get("/git/branches")
-    assert resp.status_code == 410
-    assert "disabled in Light Mode" in resp.json()["detail"]
-
-
-@pytest.mark.anyio
 async def test_git_packages_enforces_develop_only(client: httpx.AsyncClient):
     rejected = await client.get("/git/packages", params={"base_package": "pkg.base", "branch": "main"})
     assert rejected.status_code == 400
@@ -247,10 +240,7 @@ def _quantities(payload):
 
 
 @pytest.mark.anyio
-async def test_edit_endpoints_do_not_require_api_main(client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch):
-    # Guard against accidental reintroduction of `from api.main import ...` in light mode paths.
-    monkeypatch.setitem(sys.modules, "api.main", None)
-
+async def test_edit_endpoints_persist_added_classes(client: httpx.AsyncClient):
     added = await client.post("/schema/edits", json=_edits(
         ("add_class", "", {"name": "LocalClass", "is_a": "pkg.default.RootSection"}),
         ("add_attribute", "pkg.default.LocalClass", {"name": "my_q", "kind": "quantity", "dtype": "float64"}),

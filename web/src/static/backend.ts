@@ -219,9 +219,8 @@ export function createStaticBackend(options: StaticBackendOptions) {
     const ok = (value: unknown, contentType?: string): StaticAnswer => ({ status: 200, data: value, contentType });
     const route = `${method.toUpperCase()} ${path}`;
 
-    if (["POST /schema/update", "POST /send-design", "GET /git/branches", "POST /auth/login", "POST /auth/register"].includes(route)
-      || path.startsWith("/tasks") || path.startsWith("/graph")) {
-      throw new StaticHttpError(route === "GET /git/branches" ? 410 : 503, UNAVAILABLE);
+    if (route === "POST /schema/update" || route === "POST /send-design") {
+      throw new StaticHttpError(503, UNAVAILABLE);
     }
 
     if (route === "GET /health") {

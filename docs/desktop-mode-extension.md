@@ -15,7 +15,7 @@ The shared behavior lives in:
 
 The mode-specific behavior is represented by a small `ModeDescriptor` in that file.
 
-Today, only `light` is implemented. The `dev` mode name is reserved as a placeholder for future heavier modes.
+Today, only `light` is implemented.
 
 ## What A Mode Defines
 

@@ -1,4 +1,4 @@
-"""HTTP responses for the LinkML download, shared by Light Mode and Dev Mode."""
+"""HTTP responses for the LinkML download."""
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -41,14 +41,9 @@ async def _converted(package: str, function, *args) -> Any:
         raise HTTPException(status_code=500, detail=f"LinkML conversion of {package!r} failed: {exc}")
 
 
-async def linkml_download(
-    package: str, stored: Sequence[Mapping[str, Any]] = (), source: editing.Source | None = None,
-) -> Response:
-    """The module's LinkML schema as a YAML file download, with the stored edits replayed onto it.
-
-    With a `source` (Dev Mode branch) the schema is the branch's.
-    """
-    content = await _converted(package, lambda: editing.linkml_yaml(package, stored, source=source))
+async def linkml_download(package: str, stored: Sequence[Mapping[str, Any]] = ()) -> Response:
+    """The module's LinkML schema as a YAML file download, with the stored edits replayed onto it."""
+    content = await _converted(package, lambda: editing.linkml_yaml(package, stored))
     filename = f"{package}.linkml.yaml"
     return Response(
         content=content,

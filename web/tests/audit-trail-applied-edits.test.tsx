@@ -65,7 +65,6 @@ const commonGet = (graphPayload: object) => async (url: string, options?: { para
     if (options?.params?.empty) return { data: graphPayload };
     return { data: graphPayload };
   }
-  if (url === '/git/branches') return { data: { branches: ['develop'] } };
   if (url === '/git/packages') return { data: { packages: ['pkg.custom_schema'] } };
   if (url === '/roots') return { data: { sections: ['AtomsState'] } };
   return { data: {} };
@@ -75,8 +74,6 @@ const primeWorkspace = () => {
   useWorkspaceStore.getState().setPkg('pkg.custom_schema');
   useWorkspaceStore.getState().setBaseNamespace('pkg');
   useWorkspaceStore.getState().setStartEmpty(false);
-  window.localStorage.setItem('schema-uml-token', 'tok');
-  window.localStorage.setItem('schema-uml-username', 'tester');
 };
 
 describe('Audit trail seeding from applied edits', () => {

@@ -36,7 +36,7 @@ def fake_snapshot(_profile: Any, scope: str | None = None, **kwargs: Any) -> dic
         },
         "enums": {},
     }
-    commit = kwargs.get("source_version") or SOURCE["commit"]
+    commit = SOURCE["commit"]
     return {
         "profile": "nomad-simulations", "tools": {}, "report": [],
         "source": {"name": "nomad-simulations", "module": scope, "version": "1.0", "commit": commit},

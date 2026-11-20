@@ -18,17 +18,13 @@ type SharedChild = Arc<Mutex<Option<Child>>>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DesktopMode {
-    // The only production desktop target today.
     Light,
-    // Reserved for a future heavier desktop profile.
-    Dev,
 }
 
 impl DesktopMode {
     fn parse(raw: &str) -> Result<Self, String> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "light" => Ok(Self::Light),
-            "dev" => Ok(Self::Dev),
             other => Err(format!(
                 "Unsupported SCHEMA_STUDIO_DESKTOP_MODE={other:?}. Supported modes: light"
             )),
@@ -54,17 +50,12 @@ impl ModeDescriptor {
                 sidecar_basename: "schema-studio-backend",
                 health_path: "/health",
             }),
-            DesktopMode::Dev => Err(
-                "Desktop launcher mode extension is prepared, but only Light Mode is implemented right now."
-                    .to_string(),
-            ),
         }
     }
 
     fn python_command(self) -> Vec<String> {
         match self.mode {
             DesktopMode::Light => vec!["-m".to_string(), "api.light_mode.cli".to_string()],
-            DesktopMode::Dev => Vec::new(),
         }
     }
 

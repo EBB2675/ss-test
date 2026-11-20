@@ -91,8 +91,6 @@ describe('Start page databases', () => {
     useWorkspaceStore.getState().setPkg(`${SIM}.model_method`);
     useWorkspaceStore.getState().setBaseNamespace(SIM);
     useWorkspaceStore.getState().setStartEmpty(false);
-    window.localStorage.setItem('schema-uml-token', 't0k');
-    window.localStorage.setItem('schema-uml-username', 'user');
   });
 
   afterEach(() => cleanup());
@@ -180,13 +178,13 @@ describe('Start page databases', () => {
     expect(screen.getByRole('button', { name: database('bam-masterdata v0') })).not.toHaveTextContent('draft');
   });
 
-  it('marks bam-masterdata v1 as a draft when the server lists no profiles, as in Dev Mode', async () => {
+  it('marks bam-masterdata v1 as a draft when the server lists no profiles', async () => {
     answer(null);
     render(<App />);
     expect(await screen.findByRole('button', { name: database('bam-masterdata v1 \\(draft\\)') })).toBeInTheDocument();
   });
 
-  it('offers the four databases when the server lists no profiles, as in Dev Mode', async () => {
+  it('offers the four databases when the server lists no profiles', async () => {
     answer(null);
     render(<App />);
     for (const label of ['nomad-simulations', 'nomad-measurements', 'bam-masterdata v0', 'bam-masterdata v1']) {

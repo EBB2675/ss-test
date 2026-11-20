@@ -80,7 +80,7 @@ def test_linkml_is_the_default_and_legacy_can_be_chosen(extraction, monkeypatch)
 def test_linkml_path_builds_the_graph_from_the_snapshot(extraction, monkeypatch):
     monkeypatch.setenv(extraction.EXTRACTION_SETTING, "linkml")
     result = extraction.build_graph(MODEL_METHOD, root="ModelMethod", base_namespace="nomad_simulations.schema_packages")
-    assert extraction.calls == [("snapshot", "nomad-simulations", MODEL_METHOD, {"source_root": None, "source_version": None})]
+    assert extraction.calls == [("snapshot", "nomad-simulations", MODEL_METHOD, {})]
     assert result["root"] == "ModelMethod"
     assert "nomad_simulations.schema_packages.model_method.ModelMethod" in {node["id"] for node in result["nodes"]}
 
@@ -91,15 +91,6 @@ def test_linkml_path_reports_an_unknown_root_like_the_legacy_path(extraction, mo
     monkeypatch.setenv(extraction.EXTRACTION_SETTING, "linkml")
     with pytest.raises(ExtractionFailed, match="ValueError: Root section 'Nope' not found"):
         extraction.build_graph(MODEL_METHOD, root="Nope")
-
-
-def test_a_custom_extractor_stays_on_the_legacy_path(extraction, monkeypatch):
-    monkeypatch.setenv(extraction.EXTRACTION_SETTING, "linkml")
-    extraction.build_graph(MODEL_METHOD, extractor="mypackage.graphs:build")
-    assert extraction.calls[0][0] == "legacy-graph"
-    extraction.calls.clear()
-    extraction.build_graph(MODEL_METHOD, extractor=extraction.DEFAULT_EXTRACTOR, source_root="/tmp/wt", source_version="abc")
-    assert extraction.calls[0][-1] == {"source_root": "/tmp/wt", "source_version": "abc"}
 
 
 def test_usage_comes_from_the_snapshot_of_the_module_shown(extraction, monkeypatch):

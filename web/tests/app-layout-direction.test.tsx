@@ -48,15 +48,12 @@ describe('App layout direction', () => {
     useWorkspaceStore.getState().setBaseNamespace('pkg');
     useWorkspaceStore.getState().setStartEmpty(true);
     window.localStorage.removeItem(LAYOUT_DIRECTION_STORAGE_KEY);
-    window.localStorage.setItem('schema-uml-token', 't0k');
-    window.localStorage.setItem('schema-uml-username', 'user');
     mockGet.mockReset();
     mockGet.mockImplementation(async (url: string) => {
       if (url === '/workspace') {
         return { data: { workspace: { branch: 'main', package: 'pkg', base_namespace: 'pkg' }, user: { username: 'tester' } } };
       }
       if (url === '/schema') return { data: graph };
-      if (url === '/git/branches') return { data: { branches: ['main'] } };
       if (url === '/git/packages') return { data: { packages: ['pkg'] } };
       if (url === '/roots') return { data: { sections: [] } };
       return { data: {} };

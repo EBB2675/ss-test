@@ -10,7 +10,6 @@ export const DEFAULT_ROOT = import.meta.env.VITE_DEFAULT_ROOT ?? "ModelMethod";
 // The static site (GitHub Pages): no server; it behaves like Light Mode.
 // A plain comparison, so other builds can drop the static site's code entirely.
 export const STATIC_MODE = import.meta.env.VITE_STATIC_MODE === "true";
-export const LIGHT_MODE = STATIC_MODE || (import.meta.env.VITE_LIGHT_MODE ?? "false").toLowerCase() === "true";
 export const DEFAULT_BRANCH = import.meta.env.VITE_DEFAULT_BRANCH ?? "develop";
 
 export const WORKSPACE_PRESETS = [

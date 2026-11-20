@@ -61,7 +61,7 @@ def ensure_frontend_dist() -> None:
         "Missing web/dist/index.html.\n"
         "Build the Light Mode frontend first, e.g.:\n"
         "  cd web\n"
-        "  VITE_LIGHT_MODE=true npm run build"
+        "  npm run build"
     )
 
 

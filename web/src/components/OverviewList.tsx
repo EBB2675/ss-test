@@ -27,7 +27,7 @@ export default function OverviewList({
     setErr(null);
     setData(null);
 
-    apiFetch(path, { method: "GET" }, { baseURL: apiBase, token: "" })
+    apiFetch(path, { method: "GET" }, { baseURL: apiBase })
       .then(async (r) => {
         if (!r.ok) {
           const text = await r.text().catch(() => "");
