@@ -57,7 +57,7 @@ vi.mock('axios', () => {
 
   const axios = Object.assign(create, {
     create,
-    post: vi.fn(), // login, unused here
+    post: vi.fn(),
   });
 
   return { default: axios };
@@ -121,10 +121,8 @@ describe('App editable quantity add flow', () => {
     useWorkspaceStore.getState().setBaseNamespace('pkg');
     useWorkspaceStore.getState().setStartEmpty(true);
 
-    // Prime localStorage with a token so App skips login form; no audit trail from earlier tests.
+    // No audit trail from earlier tests.
     window.localStorage.removeItem('schema-uml-audit');
-    window.localStorage.setItem('schema-uml-token', 't0k');
-    window.localStorage.setItem('schema-uml-username', 'user');
 
     if (!('ResizeObserver' in window)) {
       // minimal stub for layout observer
@@ -149,9 +147,6 @@ describe('App editable quantity add flow', () => {
           return { data: baseGraph };
         }
         return { data: baseGraph };
-      }
-      if (url === '/git/branches') {
-        return { data: { branches: ['main'] } };
       }
       if (url === '/git/packages') {
         return { data: { packages: ['pkg'] } };

@@ -14,18 +14,7 @@ A schema profile must define:
 
 Current implementation lives in `api/light_mode/schema_source.py`.
 
-## 2) Namespace-to-Repo Mapping (Dev Mode)
-A schema namespace is mapped to a git repository via:
-- default mapping in `api/settings.py`
-- optional env override: `SCHEMA_UML_REPO_MAP`
-
-Format:
-- `SCHEMA_UML_REPO_MAP="ns.prefix=/path/or/url,other.prefix=/path/or/url"`
-
-Matching rule:
-- longest namespace prefix wins.
-
-## 3) Extractor Entity Contract
+## 2) Extractor Entity Contract
 The graph extractor (`extractor/graph_builder.py`) currently supports two shapes:
 
 ### NOMAD-like entities
@@ -43,12 +32,12 @@ Quantities are extracted from:
 - `PropertyTypeAssignment` class attributes (object/dataset/collection types)
 - `VocabularyTerm` class attributes (vocabulary types)
 
-## 4) Editing Contract (Current)
+## 3) Editing Contract (Current)
 Current CRUD in Schema Studio is graph-level and persisted as custom edits.
 - persisted edits are replayed into graph responses
 - this is not yet a full source-code writer/committer for schema files
 
-## 5) Planned Pluginization (TODO)
+## 4) Planned Pluginization (TODO)
 - Externalize extractor adapters into a registry (instead of built-in NOMAD/BAM checks).
 - Define adapter hooks (section detection, quantity extraction, dtype/cardinality mapping).
 - Add optional code-writer plugin hooks for repository write-back and commit/push workflow.

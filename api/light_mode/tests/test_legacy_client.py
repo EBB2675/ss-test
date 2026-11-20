@@ -87,21 +87,6 @@ def test_catalog_uses_the_discovery_method_of_the_profile(legacy, monkeypatch):
     assert json.loads(arguments) == {"base": "nomad_measurements", "dist": "nomad-measurements", "discovery": ["entry-points"]}
 
 
-def test_worktree_sources_are_passed_to_the_script_and_cached_by_commit(legacy, monkeypatch, tmp_path):
-    calls = _record_calls(legacy, monkeypatch, {"package": "p", "root": None, "nodes": [], "edges": []})
-    source = tmp_path / "worktree" / "src"
-
-    legacy.build_graph("nomad_simulations.schema_packages.general", source_root=source, source_version="abc")
-    legacy.build_graph("nomad_simulations.schema_packages.general", source_root=source, source_version="abc")
-    assert len(calls) == 1
-    assert calls[0][1][:2] == ("--source-root", str(source))
-
-    # Without a commit there is nothing safe to key the cache on.
-    legacy.build_graph("nomad_simulations.schema_packages.general", source_root=source)
-    legacy.build_graph("nomad_simulations.schema_packages.general", source_root=source)
-    assert len(calls) == 3
-
-
 def test_usage_entries_keep_their_fields(legacy, monkeypatch):
     _record_calls(
         legacy,

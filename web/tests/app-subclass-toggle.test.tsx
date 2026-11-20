@@ -91,8 +91,6 @@ describe('App subclass toggle', () => {
     useWorkspaceStore.getState().setBaseNamespace('pkg');
     useWorkspaceStore.getState().setStartEmpty(true);
     window.localStorage.removeItem('schema-uml-audit');
-    window.localStorage.setItem('schema-uml-token', 't0k');
-    window.localStorage.setItem('schema-uml-username', 'user');
     held = false;
     schemaGraph = graph;
     queue.length = 0;
@@ -107,7 +105,6 @@ describe('App subclass toggle', () => {
           queue.push({ params: options?.params ?? {}, answer: (data) => resolve({ data }) });
         });
       }
-      if (url === '/git/branches') return { data: { branches: ['main'] } };
       if (url === '/git/packages') return { data: { packages: ['pkg'] } };
       if (url === '/roots') return { data: { sections: [] } };
       return { data: {} };

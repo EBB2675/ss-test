@@ -35,7 +35,7 @@ def snapshots(studio_home, monkeypatch):
 
     module._MEMORY.clear()
     # Every module's snapshot is the whole profile's stored document; enough to compare answers.
-    monkeypatch.setattr(module, "_extract", lambda profile, scope, source_root=None: load_fixture(profile.key))
+    monkeypatch.setattr(module, "_extract", lambda profile, scope: load_fixture(profile.key))
     monkeypatch.setattr(module, "current_schema_info", lambda profile: INFO)
     yield module
     module._MEMORY.clear()

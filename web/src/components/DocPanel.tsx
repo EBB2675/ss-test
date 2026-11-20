@@ -58,24 +58,6 @@ function QtyRow({ q, onClick, onEdit, onRemove, editableMode, disabled }: { q: Q
     meta.push(`Inherited from ${q.inheritedFromName || q.inheritedFromId || "parent"}`);
   }
 
-  const diffLabel =
-    q.diff?.state === "added"
-      ? "Added"
-      : q.diff?.state === "removed"
-        ? "Removed"
-        : q.diff?.state === "changed"
-          ? "Changed"
-          : null;
-
-  const diffClass =
-    q.diff?.state === "added"
-      ? "pill"
-      : q.diff?.state === "removed"
-        ? "pill muted"
-        : q.diff?.state === "changed"
-          ? "pill warning"
-          : null;
-
   const handleClick = () => {
     if (editableMode && !disabled) {
       onEdit();
@@ -91,7 +73,6 @@ function QtyRow({ q, onClick, onEdit, onRemove, editableMode, disabled }: { q: Q
           <div style={{ fontSize: 13 }}>{q.name}</div>
           <div style={{ fontSize: 11, opacity: 0.7 }}>{meta.join("  ")}</div>
         </div>
-        {diffLabel ? <span className={diffClass || "pill"}>{diffLabel}</span> : null}
         <div className={`tag ${q.inherited ? "inherited" : "view"}`}>{q.inherited ? "Inherited" : "View"}</div>
       </button>
 
@@ -165,7 +146,6 @@ export default function DocPanel({
       inheritedFromName: q.inheritedFromName ?? null,
       sourceId: q.sourceId ?? null,
       details: q.details ?? null,
-      diff: q.diff
     });
   };
 
@@ -296,28 +276,6 @@ export default function DocPanel({
           <DetailsBlock details={selected.details} />
 
           <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid var(--panel-border)" }}>
-            {selected.diff ? (
-              <div className="doc-card" style={{ marginBottom: 12, background: "rgba(234, 179, 8, 0.05)" }}>
-                <div className="meta-label" style={{ marginBottom: 6 }}>
-                  Diff
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div>
-                    <strong>Status:</strong> {selected.diff.state}
-                  </div>
-                  {selected.diff.before ? (
-                    <div style={{ fontSize: 12 }}>
-                      <strong>Before:</strong> {[selected.diff.before.dtype, selected.diff.before.shape && selected.diff.before.shape !== "[]" ? selected.diff.before.shape : null, selected.diff.before.card ? `[${selected.diff.before.card}]` : null].filter(Boolean).join("  ") || "no metadata"}
-                    </div>
-                  ) : null}
-                  {selected.diff.after ? (
-                    <div style={{ fontSize: 12 }}>
-                      <strong>After:</strong> {[selected.diff.after.dtype, selected.diff.after.shape && selected.diff.after.shape !== "[]" ? selected.diff.after.shape : null, selected.diff.after.card ? `[${selected.diff.after.card}]` : null].filter(Boolean).join("  ") || "no metadata"}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
             <QuantityEditPanel
               editRules={editRules}
               editableMode={editableMode}

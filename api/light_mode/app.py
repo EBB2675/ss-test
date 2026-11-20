@@ -344,7 +344,7 @@ async def update_workspace(
     package: str | None = Query(None),
     base_namespace: str | None = Query(None),
 ):
-    # The web app sends a JSON body (as in Dev Mode); query parameters keep working.
+    # The web app sends a JSON body; query parameters keep working.
     if req is not None:
         branch = branch or req.branch
         package = package or req.package
@@ -519,11 +519,6 @@ async def clear_schema_edits(
         package=package, all_packages=all_packages,
     )
     return {"deleted": deleted, "workspace": _workspace_payload(ws)}
-
-
-@app.get("/git/branches")
-async def git_branches():
-    raise HTTPException(status_code=410, detail="Branch switching is disabled in Light Mode.")
 
 
 @app.get("/git/packages")

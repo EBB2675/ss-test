@@ -1,4 +1,4 @@
-import type { ChangeEvent, FormEvent, SyntheticEvent } from "react";
+import type { ChangeEvent, SyntheticEvent } from "react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import GraphView, { type GraphExportHandle } from "./GraphView";
@@ -22,16 +22,14 @@ import { useSelection } from "./store/selection";
 import { jsPDF } from "jspdf";
 import type { AuditTrailEntry, QuantityNode, UmlClassNode, UmlGraphState } from "./types/uml";
 import {
-  ensureDiffResponse,
   ensureGraphResponse,
   type ApiEdge,
   type ApiGraph,
   type ApiNode,
-  type DiffResponse
 } from "./types/api";
 import type { WorkspaceState } from "./types/workspace";
 import { createApiClient } from "./client";
-import { DEFAULT_API, DEFAULT_BRANCH, DEFAULT_NAMESPACE, DEFAULT_ROOT, DEFAULT_PACKAGE, LIGHT_MODE, STATIC_MODE, WORKSPACE_PRESETS } from "./constants/defaults";
+import { DEFAULT_API, DEFAULT_BRANCH, DEFAULT_NAMESPACE, DEFAULT_ROOT, DEFAULT_PACKAGE, STATIC_MODE, WORKSPACE_PRESETS } from "./constants/defaults";
 import { useWorkspaceStore } from "./store/workspace";
 import { fqidFromParts, normalizeId, normalizeLabel, normalizeModule } from "./utils/identifier";
 import { formatApiError } from "./utils/errors";
@@ -50,30 +48,6 @@ type WorkspaceEnvelope = { workspace?: WorkspaceState };
 // not overwrite that change, however late it arrives.
 const WORKSPACE_EPOCH = "__workspaceEpoch";
 type EpochConfig = { workspaceEpoch?: number };
-
-type TaskStatusResponse = {
-  task_id: string;
-  status: string;
-  ready: boolean;
-  result?: unknown;
-  error?: string;
-  workspace?: WorkspaceState;
-};
-
-type GraphRequestParams = {
-  root?: string;
-  include_quantities?: boolean;
-  include_subsections?: boolean;
-  include_inheritance?: boolean;
-  allow_cross_module?: boolean;
-  base_namespace?: string;
-  expand?: string;
-};
-
-type GraphTaskBody = {
-  branch: string;
-  package: string;
-};
 
 type SchemaProfileSummary = {
   key: string;
@@ -105,41 +79,16 @@ type DatabaseButton = Pick<SchemaProfileSummary, "key" | "label" | "available" |
 
 const EMPTY_DATABASE_NOTE = "not released on the tracked branch yet";
 
-type TaskEnqueueResponse = WorkspaceEnvelope & {
-  result?: unknown;
-  task_id?: string;
-};
-
 export default function App() {
   const apiBase = DEFAULT_API;
-  const [runtimeLightMode, setRuntimeLightMode] = useState<boolean>(LIGHT_MODE);
-  const isLightMode = runtimeLightMode;
-  const [token, setToken] = useState<string>(() => {
-    if (runtimeLightMode) return "light";
-    if (typeof window === "undefined") return "";
-    return window.localStorage.getItem("schema-uml-token") || "";
-  });
-  const [userName, setUserName] = useState<string | null>(() => {
-    if (runtimeLightMode) return "local";
-    if (typeof window === "undefined") return null;
-    return window.localStorage.getItem("schema-uml-username");
-  });
-  const [sessionChecked, setSessionChecked] = useState<boolean>(runtimeLightMode);
-  const [workspace, setWorkspace] = useState<WorkspaceState | null>(() =>
-    runtimeLightMode
-      ? { branch: DEFAULT_BRANCH, package: DEFAULT_PACKAGE, base_namespace: DEFAULT_NAMESPACE }
-      : null
+  const [workspace, setWorkspace] = useState<WorkspaceState>(
+    () => ({ branch: DEFAULT_BRANCH, package: DEFAULT_PACKAGE, base_namespace: DEFAULT_NAMESPACE })
   );
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [loginUsername, setLoginUsername] = useState<string>("admin");
-  const [loginPassword, setLoginPassword] = useState<string>("admin");
   const {
     branch: workspaceBranch,
     pkg,
     baseNamespace: namespace,
     startEmpty,
-    setBranch: setWorkspaceBranch,
     setPkg,
     setStartEmpty,
     applyWorkspace: applyWorkspaceInStore,
@@ -175,7 +124,7 @@ export default function App() {
   // appearance
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     if (typeof window === "undefined") return "dark";
-    const initial = initialTheme(window.localStorage.getItem("schema-uml-theme"), LIGHT_MODE);
+    const initial = initialTheme(window.localStorage.getItem("schema-uml-theme"));
     document.documentElement.setAttribute("data-theme", initial);
     return initial;
   });
@@ -216,19 +165,11 @@ export default function App() {
   const [schemaProfiles, setSchemaProfiles] = useState<SchemaProfileSummary[]>([]);
   const [schemaUpdateStatus, setSchemaUpdateStatus] = useState<string | null>(null);
   const [schemaUpdating, setSchemaUpdating] = useState<boolean>(false);
-  const canUpdateSchema = isLightMode && schemaSource !== "bundled";
-
-  // branch diff state
-  const [branches, setBranches] = useState<string[]>([]);
-  const [baseBranch, setBaseBranch] = useState<string>(workspaceBranch || "");
-  const [headBranch, setHeadBranch] = useState<string>(workspaceBranch || "");
-  const [diffData, setDiffData] = useState<DiffResponse | null>(null);
-  const [diffLoading, setDiffLoading] = useState<boolean>(false);
+  const canUpdateSchema = schemaSource !== "bundled";
 
   // collapsible controls for accessibility / quick-open links
   const [openWorkspace, setOpenWorkspace] = useState<boolean>(false);
   const [openUnderTheHood, setOpenUnderTheHood] = useState<boolean>(false);
-  const [openCompare, setOpenCompare] = useState<boolean>(false);
   const [openDocumentation, setOpenDocumentation] = useState<boolean>(true);
   const [openAuditTrail, setOpenAuditTrail] = useState<boolean>(false);
 
@@ -310,7 +251,6 @@ export default function App() {
   useEffect(() => { setMobilePanel(null); }, [canvasKey, mode, graph?.package, setMobilePanel]);
   const [overviewQuery, setOverviewQuery] = useState<string>("");
   const [overviewBranch, setOverviewBranch] = useState<string>(workspaceBranch || DEFAULT_BRANCH);
-  const [packageBranch, setPackageBranch] = useState<string>(workspaceBranch || DEFAULT_BRANCH);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -322,7 +262,7 @@ export default function App() {
   }, [auditTrail]);
 
   const api = useMemo(() => {
-    const instance = createApiClient(apiBase, token);
+    const instance = createApiClient(apiBase);
     instance.interceptors.request.use((config) => {
       (config as EpochConfig).workspaceEpoch = workspaceEpochRef.current;
       return config;
@@ -335,7 +275,7 @@ export default function App() {
       return response;
     });
     return instance;
-  }, [apiBase, token]);
+  }, [apiBase]);
 
   const isStaleResponse = useCallback((payload: unknown): boolean => {
     if (!payload || typeof payload !== "object") return false;
@@ -379,23 +319,6 @@ export default function App() {
   const wholeModelPackage = basePackageForEmpty;
   const wholeModelActive = !startEmpty && pkg === wholeModelPackage;
 
-  const preferTaskApi = useMemo(() => {
-    if (isLightMode) return false;
-    const raw = import.meta.env.VITE_USE_TASK_API;
-    if (typeof raw === "string" && raw.toLowerCase() === "false") return false;
-    return true;
-  }, [isLightMode]);
-
-  const taskPollInterval = useMemo(() => {
-    const raw = Number.parseInt(import.meta.env.VITE_TASK_POLL_MS ?? "1000", 10);
-    return Number.isFinite(raw) && raw > 0 ? raw : 1000;
-  }, []);
-
-  const taskPollTimeout = useMemo(() => {
-    const raw = Number.parseInt(import.meta.env.VITE_TASK_POLL_TIMEOUT_MS ?? "180000", 10);
-    return Number.isFinite(raw) && raw > 0 ? raw : 180000;
-  }, []);
-
   const applyWorkspace = useCallback((ws: WorkspaceState | null) => {
     if (!ws) return;
     const prev = workspaceStateRef.current;
@@ -410,12 +333,7 @@ export default function App() {
     setWorkspace(ws);
     setSchemaProfileKey(inferProfileKey(ws.package));
     applyWorkspaceInStore(ws);
-    if (ws.branch) {
-      setPackageBranch(ws.branch);
-      setOverviewBranch(ws.branch);
-      setBaseBranch((prev) => prev || ws.branch);
-      setHeadBranch((prev) => prev || ws.branch);
-    }
+    if (ws.branch) setOverviewBranch(ws.branch);
   }, [applyWorkspaceInStore]);
 
   // Build-time defaults only fill in until the server reports the workspace.
@@ -435,7 +353,6 @@ export default function App() {
 
   const updateWorkspaceOnServer = useCallback(
     async (updates: Partial<WorkspaceState>) => {
-      if (!token) return;
       // From here on, answers to earlier requests describe an outdated workspace.
       workspaceEpochRef.current += 1;
       try {
@@ -445,114 +362,8 @@ export default function App() {
         console.error("Failed to update workspace", error);
       }
     },
-    [api, syncWorkspaceFromResponse, token]
+    [api, syncWorkspaceFromResponse]
   );
-
-  const pollTaskStatus = useCallback(
-    async (taskId: string): Promise<TaskStatusResponse> => {
-      const started = Date.now();
-      let delay = taskPollInterval;
-      while (true) {
-        const res = await api.get<TaskStatusResponse>(`/tasks/${taskId}`);
-        if (res.data?.workspace) syncWorkspaceFromResponse(res.data);
-        if (res.data.status === "SUCCESS") return res.data;
-        if (res.data.status === "REVOKED" || res.data.status === "RETRY") {
-          const msg = res.data.error || `Task ${res.data.status.toLowerCase()}`;
-          throw new Error(msg);
-        }
-        if (res.data.ready && res.data.status !== "SUCCESS") {
-          const msg = res.data.error || `Task ${res.data.status.toLowerCase()}`;
-          throw new Error(msg);
-        }
-        if (res.data.status === "FAILURE") {
-          const msg = res.data.error || "Task failed";
-          throw new Error(msg);
-        }
-        if (Date.now() - started > taskPollTimeout) {
-          throw new Error("Timed out waiting for background task");
-        }
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        delay = Math.min(Math.round(delay * 1.3), 4000);
-      }
-    },
-    [api, syncWorkspaceFromResponse, taskPollInterval, taskPollTimeout]
-  );
-
-  const taskUnavailable = (err: unknown) => {
-    if (axios.isAxiosError(err) && err.response) {
-      const code = err.response.status;
-      return code === 404 || code === 405 || code === 501;
-    }
-    return false;
-  };
-
-  const enqueueGraphTask = useCallback(
-    async (body: GraphTaskBody, params: GraphRequestParams): Promise<unknown | null> => {
-      if (!preferTaskApi) return null;
-      try {
-        setCanvasStatus((prev) => prev ?? "Queued background job…");
-        const res = await api.post<TaskEnqueueResponse>("/tasks/graph", body, { params });
-        if (res.data?.workspace) syncWorkspaceFromResponse(res.data);
-        if (res.data?.result) return res.data.result;
-        if (res.data?.task_id) {
-          const finalStatus = await pollTaskStatus(res.data.task_id);
-          if (finalStatus?.workspace) syncWorkspaceFromResponse(finalStatus);
-          return finalStatus.result ?? null;
-        }
-        return null;
-      } catch (error: unknown) {
-        if (taskUnavailable(error)) {
-          setCanvasStatus(null);
-          return null;
-        }
-        setCanvasStatus(null);
-        throw error;
-      } finally {
-        setCanvasStatus(null);
-      }
-    },
-    [api, pollTaskStatus, preferTaskApi, syncWorkspaceFromResponse]
-  );
-
-  const enqueueDiffTask = useCallback(
-    async (body: { base: string; head: string; package: string }, params: GraphRequestParams): Promise<unknown | null> => {
-      if (!preferTaskApi) return null;
-      try {
-        setCanvasStatus((prev) => prev ?? "Queued background job…");
-        const res = await api.post<TaskEnqueueResponse>("/tasks/graph/diff", body, { params });
-        if (res.data?.workspace) syncWorkspaceFromResponse(res.data);
-        if (res.data?.result) return res.data.result;
-        if (res.data?.task_id) {
-          const finalStatus = await pollTaskStatus(res.data.task_id);
-          if (finalStatus?.workspace) syncWorkspaceFromResponse(finalStatus);
-          return finalStatus.result ?? null;
-        }
-        return null;
-      } catch (error: unknown) {
-        if (taskUnavailable(error)) {
-          setCanvasStatus(null);
-          return null;
-        }
-        setCanvasStatus(null);
-        throw error;
-      } finally {
-        setCanvasStatus(null);
-      }
-    },
-    [api, pollTaskStatus, preferTaskApi, syncWorkspaceFromResponse]
-  );
-
-  const logout = useCallback(() => {
-    setToken("");
-    setWorkspace(null);
-    workspaceStateRef.current = null;
-    setUserName(null);
-    setSessionChecked(true);
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem("schema-uml-token");
-      window.localStorage.removeItem("schema-uml-username");
-    }
-  }, []);
 
   const normalizePackageName = useCallback((value?: string | null) => {
     if (!value) return "";
@@ -572,9 +383,9 @@ export default function App() {
     () => schemaProfiles.find((profile) => profile.key === schemaProfileKey) ?? null,
     [schemaProfileKey, schemaProfiles]
   );
-  // Dev Mode lists no profiles; its schemas are NOMAD ones.
+  // Until the profiles load, the edit rules are NOMAD's.
   const editRules: EditRules = currentSchemaProfile?.edit_rules ?? NOMAD_EDIT_RULES;
-  const schemaSelectionRequired = isLightMode && !startEmpty && !currentSchemaProfile;
+  const schemaSelectionRequired = !startEmpty && !currentSchemaProfile;
   const selectedSchemaReady = !schemaSelectionRequired && (!currentSchemaProfile || currentSchemaProfile.available);
 
   const filterActiveAuditForPackage = useCallback(
@@ -613,18 +424,7 @@ export default function App() {
     [graph, pkg]
   );
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (token) {
-      window.localStorage.setItem("schema-uml-token", token);
-    } else {
-      window.localStorage.removeItem("schema-uml-token");
-    }
-  }, [token]);
-
-  const loadSchemaVersion = useCallback(async (
-    opts?: { silent?: boolean; promoteLight?: boolean }
-  ): Promise<boolean> => {
+  const loadSchemaVersion = useCallback(async (): Promise<boolean> => {
     try {
       const res = await api.get("/schema/version");
       if (isStaleResponse(res.data)) return true;
@@ -633,27 +433,17 @@ export default function App() {
       setSchemaProfileKey(typeof res.data?.schema_profile === "string" ? res.data.schema_profile : null);
       setSchemaProfileError(null);
       setSendDesignEnabled(Boolean(res.data?.send_design_enabled));
-      if (opts?.promoteLight && !isLightMode) {
-        setRuntimeLightMode(true);
-        setToken("light");
-        setUserName("local");
-        setSessionChecked(true);
-        applyDefaultWorkspace();
-      }
       return true;
     } catch (error) {
       setSchemaVersion(null);
       setSchemaSource(null);
       setSendDesignEnabled(false);
-      if (!opts?.silent) {
-        setSchemaUpdateStatus(`Schema version unavailable: ${formatApiError(error)}`);
-      }
+      setSchemaUpdateStatus(`Schema version unavailable: ${formatApiError(error)}`);
       return false;
     }
-  }, [api, applyDefaultWorkspace, isLightMode, isStaleResponse]);
+  }, [api, isStaleResponse]);
 
   const loadSchemaProfiles = useCallback(async () => {
-    if (!token) return;
     try {
       const res = await api.get("/schema/profiles");
       const profilesRaw = Array.isArray(res.data?.profiles) ? res.data.profiles : [];
@@ -690,73 +480,13 @@ export default function App() {
     } catch (error) {
       console.error("Failed to load schema profiles", error);
     }
-  }, [api, inferProfileKey, isStaleResponse, pkg, syncWorkspaceFromResponse, token]);
+  }, [api, inferProfileKey, isStaleResponse, pkg, syncWorkspaceFromResponse]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (userName) {
-      window.localStorage.setItem("schema-uml-username", userName);
-    } else {
-      window.localStorage.removeItem("schema-uml-username");
-    }
-  }, [userName]);
-
-  useEffect(() => {
-    if (isLightMode) {
-      setSessionChecked(true);
-      applyDefaultWorkspace();
-      loadSchemaVersion({ promoteLight: true });
-      loadSchemaProfiles();
-      return;
-    }
-    let cancelled = false;
-    const timeoutId = window.setTimeout(() => {
-      if (!cancelled) setSessionChecked(true);
-    }, 5000);
-
-    const run = async () => {
-      const detectedLight = await loadSchemaVersion({ silent: true, promoteLight: true });
-      if (cancelled || detectedLight) return;
-      if (!token) {
-        setWorkspace(null);
-        workspaceStateRef.current = null;
-        setUserName(null);
-        setSessionChecked(true);
-        return;
-      }
-      try {
-        const res = await api.get("/workspace");
-        if (cancelled) return;
-        applyWorkspace(res.data.workspace as WorkspaceState);
-        setSchemaVersion(typeof res.data?.schema_version === "string" ? res.data.schema_version : null);
-        setSchemaSource(typeof res.data?.schema_source === "string" ? res.data.schema_source : null);
-        setSchemaProfileKey(typeof res.data?.schema_profile === "string" ? res.data.schema_profile : inferProfileKey(res.data?.workspace?.package));
-        setSchemaProfileError(typeof res.data?.schema_error === "string" ? res.data.schema_error : null);
-        setAuthError(null);
-        setUserName((prev) => res.data?.user?.username || prev || null);
-      } catch (error: unknown) {
-        if (cancelled) return;
-        setAuthError(formatApiError(error));
-        logout();
-      } finally {
-        if (!cancelled) setSessionChecked(true);
-      }
-    };
-
-    run();
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-  }, [api, applyDefaultWorkspace, applyWorkspace, isLightMode, loadSchemaProfiles, loadSchemaVersion, logout, token]);
-
-  useEffect(() => {
-    if (!sessionChecked) return;
-    loadSchemaVersion({ silent: !isLightMode, promoteLight: true });
-    if (token) {
-      loadSchemaProfiles();
-    }
-  }, [isLightMode, loadSchemaProfiles, loadSchemaVersion, sessionChecked, token]);
+    applyDefaultWorkspace();
+    loadSchemaVersion();
+    loadSchemaProfiles();
+  }, [applyDefaultWorkspace, loadSchemaProfiles, loadSchemaVersion]);
 
   const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
   const clampDocWidth = useCallback((value: number) => {
@@ -802,35 +532,12 @@ export default function App() {
     return () => observer.disconnect();
   }, [clampDocWidth]);
 
-  const handleLogin = async (e: FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    try {
-      const endpoint = authMode === "register" ? "/auth/register" : "/auth/login";
-      const res = await createApiClient(apiBase).post(endpoint, {
-        username: loginUsername,
-        password: loginPassword,
-      });
-      const nextToken = res.data.access_token as string;
-      setToken(nextToken);
-      setUserName(res.data.user?.username ?? loginUsername);
-      applyWorkspace(res.data.workspace as WorkspaceState);
-      setSessionChecked(true);
-    } catch (error: unknown) {
-      const detail = axios.isAxiosError(error) ? error.response?.data?.detail : undefined;
-      setAuthError((detail && String(detail)) || formatApiError(error) || String(error));
-    }
-  };
-
   useEffect(() => {
-    if (!workspace || !token) return;
     const updates: Partial<WorkspaceState> = {};
-    const desiredBranch = isLightMode ? workspace.branch : (packageBranch || workspace.branch);
     if (workspace.package !== pkg) updates.package = pkg;
     if (workspace.base_namespace !== normalizedNamespace) updates.base_namespace = normalizedNamespace;
-    if (!isLightMode && workspace.branch !== desiredBranch) updates.branch = desiredBranch;
     if (Object.keys(updates).length > 0) updateWorkspaceOnServer(updates);
-  }, [isLightMode, normalizedNamespace, packageBranch, pkg, token, updateWorkspaceOnServer, workspace]);
+  }, [normalizedNamespace, pkg, updateWorkspaceOnServer, workspace]);
 
   const startSidebarResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -852,30 +559,25 @@ export default function App() {
   };
 
   const helpSummary = useMemo(
-    () => {
-      const lines = [
+    () => [
         "Start page (center): pick a schema; its bird's-eye view lists every module with its classes, and a class opens its diagram.",
         "Workspace (left): diagram options, Build graph, import and export.",
         "Graph canvas (center): pan/zoom, select classes; switch from UML to Edit to add, rename or remove classes and quantities.",
         "Documentation (right): class and quantity docs; edit quantities in Edit mode.",
         "Under the hood (right, below Documentation): where the selected class is used in code.",
         "Audit trail (left): log of your edits to communicate them; export or clear it anytime.",
-      ];
-      if (!isLightMode) lines.push("Compare branches (left): diff two git branches.");
-      lines.push("Empty canvas: sketch your own classes and quantities without loading an existing schema.");
-      return lines;
-    },
-    [isLightMode]
+        "Empty canvas: sketch your own classes and quantities without loading an existing schema.",
+    ],
+    []
   );
 
   const [helpOpen, setHelpOpen] = useState<boolean>(false);
 
-  const focusAndOpen = useCallback((section: "workspace" | "documentation" | "audit" | "compare" | "under" ) => {
+  const focusAndOpen = useCallback((section: "workspace" | "documentation" | "audit" | "under" ) => {
     const mapping: Record<typeof section, { setter: (v: boolean) => void; elementId: string }> = {
       workspace: { setter: setOpenWorkspace, elementId: "section-workspace" },
       documentation: { setter: setOpenDocumentation, elementId: "section-documentation" },
       audit: { setter: setOpenAuditTrail, elementId: "section-audit" },
-      compare: { setter: setOpenCompare, elementId: "section-compare" },
       under: { setter: setOpenUnderTheHood, elementId: "section-under" },
     };
 
@@ -921,15 +623,13 @@ export default function App() {
 
   // Keeps the root a section of the selected package.
   const loadRoots = useCallback(async () => {
-    if (!token) return;
     if (startEmpty) {
       setRoot("");
       return;
     }
     setErr(null);
     try {
-      // Dev Mode reads the branch it draws; Light Mode has a single, fixed one.
-      const r = await api.get("/roots", { params: { package: pkg, branch: isLightMode ? undefined : workspaceBranch || undefined } });
+      const r = await api.get("/roots", { params: { package: pkg } });
       const list = r.data.sections || [];
       // The whole data model has no root.
       if (list.length > 0 && !list.includes(root) && !wholeModelActive) setRoot(list[0]);
@@ -937,120 +637,37 @@ export default function App() {
     } catch (e: unknown) {
       setErr(formatApiError(e));
     }
-  }, [api, isLightMode, pkg, root, startEmpty, syncWorkspaceFromResponse, token, wholeModelActive, workspaceBranch]);
+  }, [api, pkg, root, startEmpty, syncWorkspaceFromResponse, wholeModelActive]);
 
   // The module's graph as the server draws it; no state changes beyond the workspace sync.
   const fetchGraph = useCallback(async (
-    opts: { pkg: string; root: string; namespace: string; branch: string; empty: boolean; expand: string[] }
+    opts: { pkg: string; root: string; namespace: string; empty: boolean; expand: string[] }
   ): Promise<ApiGraph> => {
-    const expand = opts.expand.length ? opts.expand.join(",") : undefined;
-    let parsed: ApiGraph | null = null;
-    if (opts.empty) {
-      const r = await api.get("/schema", {
-        params: {
-          package: opts.pkg,
-          root: opts.root,
-          include_quantities: includeQuantities,
-          include_subsections: includeSubsections,
-          include_inheritance: includeInheritance,
-          allow_cross_module: crossModules,
-          base_namespace: opts.namespace || undefined,
-          expand,
-          empty: true,
-        },
-      });
-      parsed = ensureGraphResponse(r.data);
-      syncWorkspaceFromResponse(r.data);
-      return parsed;
-    }
-    if (isLightMode) {
-      const r = await api.get("/schema", {
-        params: {
-          package: opts.pkg,
-          root: opts.root,
-          include_quantities: includeQuantities,
-          include_subsections: includeSubsections,
-          include_inheritance: includeInheritance,
-          allow_cross_module: crossModules,
-          base_namespace: opts.namespace || undefined,
-          expand,
-        },
-      });
-      parsed = ensureGraphResponse(r.data);
-      syncWorkspaceFromResponse(r.data);
-    } else if (opts.branch) {
-      const asyncResult = await enqueueGraphTask(
-        { branch: opts.branch, package: opts.pkg },
-        {
-          root: opts.root,
-          include_quantities: includeQuantities,
-          include_subsections: includeSubsections,
-          include_inheritance: includeInheritance,
-          allow_cross_module: crossModules,
-          base_namespace: opts.namespace || undefined,
-          expand,
-        }
-      );
-      if (asyncResult) {
-        const maybeGraph = (asyncResult as { graph?: unknown })?.graph ?? asyncResult;
-        parsed = ensureGraphResponse(maybeGraph);
-        syncWorkspaceFromResponse(asyncResult as WorkspaceEnvelope);
-      }
-      if (!parsed) {
-        const r = await api.post(
-          "/graph",
-          {
-            branch: opts.branch,
-            package: opts.pkg,
-          },
-          {
-            params: {
-              root: opts.root,
-              include_quantities: includeQuantities,
-              include_subsections: includeSubsections,
-              include_inheritance: includeInheritance,
-              allow_cross_module: crossModules,
-              base_namespace: opts.namespace || undefined,
-              expand,
-            },
-          }
-        );
-        parsed = ensureGraphResponse(r.data?.graph ?? r.data);
-        syncWorkspaceFromResponse(r.data);
-      }
-    } else {
-      const r = await api.get("/schema", {
-        params: {
-          package: opts.pkg,
-          root: opts.root,
-          include_quantities: includeQuantities,
-          include_subsections: includeSubsections,
-          include_inheritance: includeInheritance,
-          allow_cross_module: crossModules,
-          base_namespace: opts.namespace || undefined,
-          expand,
-        },
-      });
-      parsed = ensureGraphResponse(r.data);
-      syncWorkspaceFromResponse(r.data);
-    }
-    if (!parsed) throw new Error("Failed to load graph");
+    const r = await api.get("/schema", {
+      params: {
+        package: opts.pkg,
+        root: opts.root,
+        include_quantities: includeQuantities,
+        include_subsections: includeSubsections,
+        include_inheritance: includeInheritance,
+        allow_cross_module: crossModules,
+        base_namespace: opts.namespace || undefined,
+        expand: opts.expand.length ? opts.expand.join(",") : undefined,
+        empty: opts.empty || undefined,
+      },
+    });
+    const parsed = ensureGraphResponse(r.data);
+    syncWorkspaceFromResponse(r.data);
     return parsed;
-  }, [api, crossModules, enqueueGraphTask, includeQuantities, includeSubsections, includeInheritance, isLightMode, syncWorkspaceFromResponse]);
+  }, [api, crossModules, includeQuantities, includeSubsections, includeInheritance, syncWorkspaceFromResponse]);
 
-  // build single-branch graph (resets diff view)
   // keepView: the same graph again (after an undo, say), so the canvas keeps its layout and view.
   const loadGraph = useCallback(async (
-    overrides?: { pkg?: string; root?: string; namespace?: string; branch?: string; forceEmpty?: boolean; expand?: string[]; keepView?: boolean }
+    overrides?: { pkg?: string; root?: string; namespace?: string; forceEmpty?: boolean; expand?: string[]; keepView?: boolean }
   ) => {
-    if (!token) {
-      setErr("Login required");
-      return;
-    }
     const pkgToUse = overrides?.pkg ?? pkg;
     const rootToUse = overrides?.root ?? root;
     const namespaceToUse = overrides?.namespace ?? normalizedNamespace;
-    const branchToUse = overrides?.branch ?? workspaceBranch ?? "";
     const useEmpty = overrides?.forceEmpty ?? startEmpty;
     if (!useEmpty) {
       setStartEmpty(false);
@@ -1060,13 +677,12 @@ export default function App() {
     setErr(null);
     setQuantityActionErr(null);
     setLoading(true);
-    setDiffData(null);
     const request = ++graphRequestRef.current;
     // Another module or root starts with no class expanded.
     const expand = overrides?.expand ?? (pkgToUse === pkg && rootToUse === root ? expandIntentRef.current : []);
     try {
       const parsed = await fetchGraph({
-        pkg: pkgToUse, root: rootToUse, namespace: namespaceToUse, branch: branchToUse, empty: useEmpty, expand,
+        pkg: pkgToUse, root: rootToUse, namespace: namespaceToUse, empty: useEmpty, expand,
       });
       if (request !== graphRequestRef.current) return;
       expandedRef.current = expand;
@@ -1090,13 +706,9 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [archiveAllAuditEntries, fetchGraph, normalizedNamespace, pkg, root, setStartEmpty, startEmpty, token, workspaceBranch]);
+  }, [archiveAllAuditEntries, fetchGraph, normalizedNamespace, pkg, root, setStartEmpty, startEmpty]);
 
   const resetEmptyCanvas = useCallback(async () => {
-    if (!token) {
-      setErr("Login required");
-      return;
-    }
     const targetPkg = scratchPackage;
     try {
       setCanvasStatus("Resetting canvas…");
@@ -1108,32 +720,12 @@ export default function App() {
       setSelected(null);
       setSelectedClassId(null);
       setSelectedQuantityId(null);
-      await loadGraph({ pkg: targetPkg, root: "", namespace: normalizedNamespace, branch: workspaceBranch, forceEmpty: true, expand: [] });
+      await loadGraph({ pkg: targetPkg, root: "", namespace: normalizedNamespace, forceEmpty: true, expand: [] });
       setCanvasStatus("Canvas reset to empty.");
     } catch (e: unknown) {
       setCanvasStatus(`Reset failed: ${formatApiError(e)}`);
     }
-  }, [api, archiveAuditTrail, loadGraph, normalizedNamespace, scratchPackage, setSelected, token, workspaceBranch]);
-
-  // fetch git branches
-  const loadBranches = useCallback(async () => {
-    if (!token) return;
-    if (isLightMode) {
-      const fixedBranch = workspaceBranch || DEFAULT_BRANCH;
-      setBranches([fixedBranch]);
-      setBaseBranch(fixedBranch);
-      setHeadBranch(fixedBranch);
-      return;
-    }
-    try {
-      const r = await api.get("/git/branches", { params: { base_package: normalizedNamespace } });
-      setBranches(r.data.branches || []);
-      syncWorkspaceFromResponse(r.data);
-    } catch (e) {
-      // keep silent in UI; dropdown will just be empty
-      console.error("Failed to load branches", e);
-    }
-  }, [api, isLightMode, normalizedNamespace, syncWorkspaceFromResponse, token, workspaceBranch]);
+  }, [api, archiveAuditTrail, loadGraph, normalizedNamespace, scratchPackage, setSelected]);
 
   const applySchemaProfile = useCallback(async (profileKey: string) => {
     const selected = schemaProfiles.find((profile) => profile.key === profileKey);
@@ -1147,18 +739,15 @@ export default function App() {
     setSchemaProfileKey(profileKey);
     setPkg(nextPackage);
     setRoot(nextRoot);
-    if (!isLightMode) {
-      setWorkspaceBranch(nextBranch);
-    }
     applyWorkspace({ branch: nextBranch, package: nextPackage, base_namespace: nextNamespace });
     await updateWorkspaceOnServer({
       branch: nextBranch,
       package: nextPackage,
       base_namespace: nextNamespace,
     });
-  }, [applyWorkspace, isLightMode, schemaProfiles, setPkg, setWorkspaceBranch, updateWorkspaceOnServer]);
+  }, [applyWorkspace, schemaProfiles, setPkg, updateWorkspaceOnServer]);
 
-  // Dev Mode lists no profiles; its buttons come from the presets.
+  // Until the server lists its profiles, the buttons come from the presets.
   const databases = useMemo<DatabaseButton[]>(
     () => (schemaProfiles.length
       ? schemaProfiles
@@ -1179,17 +768,11 @@ export default function App() {
     await applySchemaProfile(profileKey);
   }, [applySchemaProfile]);
 
-  // Keeps the package one of the schema's modules on the selected branch.
+  // Keeps the package one of the schema's modules.
   const loadPackages = useCallback(async () => {
-    if (!token) return;
     setErr(null);
     try {
-      const r = await api.get("/git/packages", {
-        params: {
-          branch: isLightMode ? undefined : packageBranch,
-          base_package: normalizedNamespace,
-        },
-      });
+      const r = await api.get("/git/packages", { params: { base_package: normalizedNamespace } });
       const raw: string[] = r.data.packages || [];
       const filtered = raw.filter((p: string) => !p.endsWith(".__init__"));
       const list = (filtered.length ? filtered : raw).filter(Boolean);
@@ -1211,7 +794,7 @@ export default function App() {
       console.error("Failed to load packages", e);
       setErr(formatApiError(e));
     }
-  }, [api, isLightMode, normalizedNamespace, packageBranch, pkg, scratchPackage, setPkg, startEmpty, syncWorkspaceFromResponse, token, wholeModelPackage]);
+  }, [api, normalizedNamespace, pkg, scratchPackage, setPkg, startEmpty, syncWorkspaceFromResponse, wholeModelPackage]);
 
   const loadSelectedSchemaProfile = useCallback(async () => {
     if (!schemaProfileKey) return;
@@ -1235,70 +818,10 @@ export default function App() {
   }, [api, loadPackages, loadRoots, loadSchemaProfiles, schemaProfileKey]);
 
   useEffect(() => {
-    if (!workspace || !token) return;
-    loadBranches();
     loadSchemaProfiles();
     loadPackages();
     loadRoots();
-  }, [loadBranches, loadPackages, loadRoots, loadSchemaProfiles, token, workspace]);
-
-  // compare base/head using same filters as sidebar
-  const compareBranches = async () => {
-    if (!token) {
-      setErr("Login required");
-      return;
-    }
-    if (isLightMode) {
-      setErr("Branch comparison is disabled in Light Mode.");
-      return;
-    }
-    if (!baseBranch || !headBranch) return;
-    setErr(null);
-    setQuantityActionErr(null);
-    setDiffLoading(true);
-    setGraph(null); // switch to diff mode
-    const request = ++graphRequestRef.current;
-    try {
-      const params = {
-        root,
-        include_quantities: includeQuantities,
-        include_subsections: includeSubsections,
-        include_inheritance: includeInheritance,
-        allow_cross_module: crossModules,
-        base_namespace: normalizedNamespace || undefined,
-      };
-
-      const asyncResult = await enqueueDiffTask(
-        { base: baseBranch, head: headBranch, package: pkg },
-        params
-      );
-      const responseData = asyncResult
-        ? asyncResult
-        : (
-          await api.post(
-            "/graph/diff",
-            {
-              base: baseBranch,
-              head: headBranch,
-              package: pkg,
-            },
-            { params }
-          )
-        ).data;
-
-      if (request !== graphRequestRef.current) return;
-      const parsed = ensureDiffResponse(responseData);
-      setDiffData(parsed);
-      setCanvasKey((key) => key + 1);
-      syncWorkspaceFromResponse(responseData);
-    } catch (e: unknown) {
-      if (request !== graphRequestRef.current) return;
-      setErr(formatApiError(e));
-      setDiffData(null);
-    } finally {
-      setDiffLoading(false);
-    }
-  };
+  }, [loadPackages, loadRoots, loadSchemaProfiles, workspace]);
 
   const seedAuditFromAppliedEdits = useCallback(
     (graphWithEdits: ApiGraph | null) => {
@@ -1328,7 +851,6 @@ export default function App() {
       }
       const blankGraph: ApiGraph = { package: targetPkg, root: "", nodes: [], edges: [] };
       setMode("graph");
-      setDiffData(null);
       archiveAuditTrail();
       graphRequestRef.current += 1;
       setGraph(blankGraph);
@@ -1573,8 +1095,6 @@ export default function App() {
           base_namespace: normalizedNamespace || undefined,
           empty: startEmpty ? true : undefined,
           expand: expand.length ? expand.join(",") : undefined,
-          // Dev Mode checks and draws the edits on the branch it shows.
-          branch: isLightMode ? undefined : workspaceBranch || undefined,
         },
       }
     );
@@ -1595,11 +1115,6 @@ export default function App() {
     const currentGraph = ensureEditableReady();
     if (!currentGraph) {
       throw new Error(addBlockedReason || "Canvas is not editable");
-    }
-    if (!token) {
-      const message = "Login required";
-      setQuantityActionErr(message);
-      throw new Error(message);
     }
     const targetClass = umlState?.classes.find((c) => c.id === classId);
     if (!targetClass) {
@@ -1682,11 +1197,6 @@ export default function App() {
     const currentGraph = ensureEditableReady();
     if (!currentGraph) {
       throw new Error(addBlockedReason || "Canvas is not editable");
-    }
-    if (!token) {
-      const message = "Login required";
-      setQuantityActionErr(message);
-      throw new Error(message);
     }
     setCreatingClass(true);
     setQuantityActionErr(null);
@@ -1904,7 +1414,7 @@ export default function App() {
       try {
         const parsed = await fetchGraph({
           pkg: graph?.package || pkg, root: startEmpty ? "" : root, namespace: normalizedNamespace,
-          branch: workspaceBranch ?? "", empty: startEmpty, expand: next,
+          empty: startEmpty, expand: next,
         });
         if (request !== graphRequestRef.current) return;
         expandedRef.current = next;
@@ -1917,7 +1427,7 @@ export default function App() {
         setErr(formatApiError(e) || "Failed to load graph");
       }
     },
-    [fetchGraph, graph?.package, loading, normalizedNamespace, pkg, replayGraphWithAudit, root, startEmpty, workspaceBranch]
+    [fetchGraph, graph?.package, loading, normalizedNamespace, pkg, replayGraphWithAudit, root, startEmpty]
   );
 
   const rebuildGraphWithAudit = useCallback(
@@ -1995,23 +1505,20 @@ export default function App() {
   }, [pkg, scratchPackage, setStartEmpty, startEmpty]);
 
   useEffect(() => {
-    loadBranches();
     loadPackages();
-  }, [loadBranches, loadPackages, normalizedNamespace, packageBranch]);
+  }, [loadPackages, normalizedNamespace]);
 
   const selectedClassName = selected?.kind === "class" ? selected.name : null;
   const addBlockedReason =
     mode !== "graph"
       ? "Switch to diagram view to modify quantities"
-      : diffData
-        ? "Exit branch comparison to modify quantities"
-        : !graph
-          ? "Build a graph first to modify quantities"
-          : wholeModelActive
-            ? "The whole data model is view only; open a class from the class list to edit it"
-            : null;
+      : !graph
+        ? "Build a graph first to modify quantities"
+        : wholeModelActive
+          ? "The whole data model is view only; open a class from the class list to edit it"
+          : null;
 
-  const currentGraph = diffData ? diffData.head?.graph ?? null : graph;
+  const currentGraph = graph;
   const currentPackageForAudit = normalizePackageName(currentGraph?.package || pkg);
   const auditEntriesForCurrentPackage = useMemo(
     () =>
@@ -2074,16 +1581,6 @@ export default function App() {
     rebuildGraphWithAudit(updated);
   };
 
-  const handleBranchSelect = (value: string) => {
-    if (isLightMode) return;
-    setPackageBranch(value);
-    setOverviewBranch(value);
-    setBaseBranch((prev) => prev || value);
-    setHeadBranch((prev) => prev || value);
-    setWorkspaceBranch(value);
-    updateWorkspaceOnServer({ branch: value });
-  };
-
   const handleCanvasClassSelect = useCallback((cls: UmlClassNode) => {
     setSelectedClassId(cls.id);
     setSelectedQuantityId(null);
@@ -2132,7 +1629,6 @@ export default function App() {
     setMode("graph");
     setGraph(null);
     setBaseGraph(null);
-    setDiffData(null);
     setSelectedClassId(null);
     setSelectedQuantityId(null);
     setSelected(null);
@@ -2147,12 +1643,10 @@ export default function App() {
     setMode("graph");
     setPkg(pkgName);
     setRoot(className);
-    setPackageBranch((prev) => prev || overviewBranch);
     loadGraph({
       pkg: pkgName,
       root: className,
       namespace: normalizedNamespace,
-      branch: overviewBranch,
     });
   };
 
@@ -2160,12 +1654,10 @@ export default function App() {
     setMode("graph");
     setPkg(wholeModelPackage);
     setRoot("");
-    setPackageBranch((prev) => prev || overviewBranch);
     loadGraph({
       pkg: wholeModelPackage,
       root: "",
       namespace: normalizedNamespace,
-      branch: overviewBranch,
       expand: [],
     });
   };
@@ -2435,9 +1927,9 @@ export default function App() {
     a.click();
   };
 
-  // Profiles without a LinkML converter say so; Dev Mode lists no profiles, so the server decides there.
+  // Profiles without a LinkML converter say so; until they load, the server decides.
   const canExportLinkml = currentSchemaProfile?.linkml_export ?? true;
-  // What the schema source offers besides the schema; Dev Mode lists no profiles, so everything stays on there.
+  // What the schema source offers besides the schema; until the profiles load, everything stays on.
   const profileCapabilities = currentSchemaProfile?.capabilities;
   const showUsage = !profileCapabilities || profileCapabilities.includes("usage");
   const showMethods = !profileCapabilities || profileCapabilities.includes("methods");
@@ -2451,7 +1943,7 @@ export default function App() {
     setLinkmlStatus("Preparing LinkML export...");
     try {
       const res = await api.get("/schema/linkml", {
-        params: { package: currentGraph.package, branch: isLightMode ? undefined : workspaceBranch || undefined },
+        params: { package: currentGraph.package },
         responseType: "blob",
       });
       const url = URL.createObjectURL(res.data as Blob);
@@ -2530,7 +2022,6 @@ export default function App() {
           edges: candidate.edges as ApiEdge[],
         };
         setMode("graph");
-        setDiffData(null);
         graphRequestRef.current += 1;
         setGraph(nextGraph);
         setBaseGraph(nextGraph);
@@ -2580,17 +2071,6 @@ export default function App() {
     pdf.save(`${currentGraph.package}_${currentGraph.root || "all"}.pdf`);
   };
 
-  const exportAuditLog = () => {
-    if (!auditTrail.length) return;
-    const blob = new Blob([JSON.stringify(auditTrail, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "schema-uml-audit-log.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const sendDesign = async () => {
     if (!sendDesignEnabled) {
       setSendStatus("Send design is disabled. Set SCHEMA_STUDIO_SEND_ENDPOINT to enable it.");
@@ -2636,60 +2116,6 @@ export default function App() {
     }
   };
 
-  const restoring = token && !sessionChecked;
-
-  if (!token || !sessionChecked || !userName) {
-    return (
-      <main className="app-shell" ref={appShellRef} style={{ gridTemplateColumns: `${sidebarWidth}px 10px 1fr` }}>
-        <div className="sidebar" style={{ gridColumn: "1 / span 3", padding: 24 }}>
-          <h2>{restoring ? "Restoring session…" : authMode === "register" ? "Create account" : "Sign in"}</h2>
-          <p className="subdued">
-            {restoring
-              ? "Checking saved credentials. If this hangs, sign in again."
-              : authMode === "register"
-                ? "Pick a username and password to create your workspace."
-                : "Authenticate to load your workspace."}
-          </p>
-          <form className="action-stack" onSubmit={handleLogin} style={{ maxWidth: 360 }}>
-            <label className="label">Username</label>
-            <input className="input" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} />
-            <label className="label">Password</label>
-            <input
-              className="input"
-              type="password"
-              value={loginPassword}
-              onChange={(e) => setLoginPassword(e.target.value)}
-            />
-            <button className="btn" type="submit">
-              {authMode === "register" ? "Create account" : "Sign in"}
-            </button>
-            <button
-              className="btn ghost"
-              type="button"
-              onClick={() => {
-                setAuthError(null);
-                setAuthMode((mode) => (mode === "register" ? "login" : "register"));
-              }}
-            >
-              {authMode === "register" ? "Already have an account? Sign in" : "New here? Create an account"}
-            </button>
-            {authError ? <p style={{ color: "#fca5a5" }}>{authError}</p> : null}
-          </form>
-        </div>
-      </main>
-    );
-  }
-
-  if (!workspace) {
-    return (
-      <main className="app-shell" ref={appShellRef} style={{ gridTemplateColumns: `${sidebarWidth}px 10px 1fr` }}>
-        <div className="sidebar" style={{ gridColumn: "1 / span 3", padding: 24 }}>
-          <p>Loading workspace…</p>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main
       className={`app-shell ${STATIC_MODE ? "responsive-studio" : ""} ${mobilePanel ? `mobile-${mobilePanel}-open` : ""}`}
@@ -2713,14 +2139,12 @@ export default function App() {
           <p className="subdued">
             {STATIC_MODE
               ? "Explore and shape materials science schemas."
-              : isLightMode
-              ? "Running in Light Mode (local, single-user, non-production)."
-              : "Craft diagrams, compare branches, and edit schemas across compatible repositories."}
+              : "Running in Light Mode (local, single-user, non-production)."}
           </p>
           {STATIC_MODE ? null : (
             <div className="row" style={{ marginTop: 10, flexWrap: "wrap", gap: 8 }}>
-              <span className="tag">{loading || diffLoading ? "Working…" : "Ready"}</span>
-              {isLightMode ? <span className="tag muted">Single-user</span> : null}
+              <span className="tag">{loading ? "Working…" : "Ready"}</span>
+              <span className="tag muted">Single-user</span>
               {schemaVersion ? (
                 <span className="tag">Schema {schemaVersion.slice(0, 9)}{schemaSource ? ` (${schemaSource})` : ""}</span>
               ) : (
@@ -2746,7 +2170,7 @@ export default function App() {
               </button>
             </div>
           </div>
-          {isLightMode && !STATIC_MODE ? (
+          {!STATIC_MODE ? (
             <div className="row" style={{ marginTop: 12, gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <button
                 className="btn secondary"
@@ -2770,20 +2194,6 @@ export default function App() {
           ) : null}
         </div>
 
-        {!isLightMode && token && userName ? (
-          <div className="brand-card">
-            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <p className="eyebrow">Signed in</p>
-                <h4 style={{ margin: 0 }}>{userName ?? "User"}</h4>
-              </div>
-              <button className="btn secondary" onClick={logout} type="button">
-                Logout
-              </button>
-            </div>
-          </div>
-        ) : null}
-
         <CollapsibleSection
           title="Workspace"
           hint="Explore the data model"
@@ -2797,23 +2207,6 @@ export default function App() {
                 <StaticSitePanel onEditsChanged={() => void loadGraph({ keepView: true })} />
               </Suspense>
             ) : null}
-            {isLightMode ? null : (
-              <div>
-                <label className="label">Choose from branch</label>
-                <select
-                  className="select"
-                  value={packageBranch}
-                  onChange={(e) => handleBranchSelect(e.target.value)}
-                >
-                  {[packageBranch || DEFAULT_BRANCH, ...branches.filter((b) => b !== packageBranch)].map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
             <div className="control-grid" style={{ marginTop: 4 }}>
               <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
                 <input
@@ -2923,7 +2316,7 @@ export default function App() {
               </div>
             ) : null}
 
-            {isLightMode && sendDesignEnabled ? (
+            {sendDesignEnabled ? (
               <div className="card" style={{ marginTop: 12, padding: 12, border: "1px solid var(--border)", borderRadius: 8, display: "flex", flexDirection: "column", gap: 8 }}>
                 <div className="row" style={{ alignItems: "center", gap: 8 }}>
                   <strong>Send Design</strong>
@@ -2963,17 +2356,6 @@ export default function App() {
         >
           <div className="action-stack" style={{ gap: 10 }}>
             <div className="row" style={{ gap: 8 }}>
-              {!isLightMode ? (
-                <button
-                  className="btn secondary"
-                  type="button"
-                  onClick={exportAuditLog}
-                  disabled={!auditTrail.length}
-                  title={auditTrail.length ? "Download audit log as JSON" : "No edits recorded yet"}
-                >
-                  Export audit JSON
-                </button>
-              ) : null}
               <button
                 className="btn secondary"
                 type="button"
@@ -3076,57 +2458,6 @@ export default function App() {
           </div>
         </CollapsibleSection>
 
-        {!isLightMode ? (
-          <CollapsibleSection
-            title="Compare branches"
-            hint="Diff diagrams across git"
-            id="section-compare"
-            open={openCompare}
-            onToggle={setOpenCompare}
-          >
-            <div className="action-stack">
-              <div>
-                <label className="label">Base branch</label>
-                <select
-                  className="select"
-                  value={baseBranch}
-                  onChange={(e) => setBaseBranch(e.target.value)}
-                >
-                  <option value="">-</option>
-                  {branches.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="label">Head branch</label>
-                <select
-                  className="select"
-                  value={headBranch}
-                  onChange={(e) => setHeadBranch(e.target.value)}
-                >
-                  <option value="">-</option>
-                  {branches.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <button
-                className="btn"
-                onClick={compareBranches}
-                disabled={!baseBranch || !headBranch || diffLoading}
-              >
-                {diffLoading ? "Comparing…" : "Compare"}
-              </button>
-            </div>
-          </CollapsibleSection>
-        ) : null}
       </aside>
       <div
         className="resizer"
@@ -3173,9 +2504,6 @@ export default function App() {
                 <button className="link-button" type="button" onClick={() => focusAndOpen("workspace")}>Workspace</button>
                 <button className="link-button" type="button" onClick={() => focusAndOpen("documentation")}>Documentation</button>
                 <button className="link-button" type="button" onClick={() => focusAndOpen("audit")}>Audit trail</button>
-                {!isLightMode ? (
-                  <button className="link-button" type="button" onClick={() => focusAndOpen("compare")}>Compare branches</button>
-                ) : null}
                 <button className="link-button" type="button" onClick={() => setMode("overview")}>Overview</button>
               </div>
             </div>
@@ -3212,58 +2540,11 @@ export default function App() {
                 apiBase={apiBase}
                 branch={overviewBranch}
                 base={normalizedNamespace}
-                token={token}
                 onClassSelect={handleOverviewClassSelect}
                 query={overviewQuery}
                 onQueryChange={setOverviewQuery}
               />
             </div>
-          ) : diffData ? (
-            <>
-              <div className="workspace-toolbar" style={{ justifyContent: "space-between" }}>
-                <div className="row" style={{ alignItems: "center" }}>
-                  <HomeButton onClick={returnToHome} />
-                  <button className="btn secondary" type="button" onClick={() => graphHandle?.refit()} disabled={!graphHandle}>
-                    Fit to view
-                  </button>
-                  <select
-                    className="select"
-                    value={layoutDirection}
-                    onChange={(e) => setLayoutDirection(e.target.value as LayoutDirection)}
-                    aria-label="Layout direction"
-                    title="Where the most general class goes; the diagram is laid out again"
-                    style={{ width: "auto" }}
-                  >
-                    {LAYOUT_DIRECTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                  <div>
-                    Base: {diffData.base.branch} ({diffData.base.sha.slice(0, 7)}) → Head: {diffData.head.branch} ({diffData.head.sha.slice(0, 7)})
-                  </div>
-                </div>
-                <div className="row" style={{ gap: 10, alignItems: "center" }}>
-                  <span className="pill diff added">🟩 Added</span>
-                  <span className="pill diff changed">🟨 Changed</span>
-                  <span className="pill diff removed">🟥 Removed</span>
-                </div>
-              </div>
-              <GraphView
-                nodes={diffData.head.graph.nodes}
-                edges={diffData.head.graph.edges}
-                diff={diffData.diff}
-                baseNamespaces={namespaceFilters}
-                showBaseSections={showBaseSections}
-                pinnedClassIds={pinnedClassIds}
-                showQuantityMetadata={showQuantityMetadata}
-                showInheritance={includeInheritance}
-                theme={theme}
-                layoutDirection={layoutDirection}
-                onReady={setGraphHandle}
-                layoutKey={canvasKey}
-                onLayoutReady={focusRootSection}
-              />
-            </>
           ) : graph ? (
             <>
               <div style={{ position: "relative", flex: 1 }}>
@@ -3420,7 +2701,7 @@ export default function App() {
                           {profile.label}
                           {profile.draft ? <span className="draft-tag"> (draft)</span> : null}
                         </span>
-                        {STATIC_MODE || !isLightMode ? null : (
+                        {STATIC_MODE ? null : (
                           <span className="small" style={{ color: isSelected ? "inherit" : "var(--muted)" }}>
                             {profile.available
                               ? profile.source === "bundled"
@@ -3560,7 +2841,7 @@ export default function App() {
                   open={openUnderTheHood}
                   onToggle={setOpenUnderTheHood}
                 >
-                  <UnderTheHoodPanel apiBase={apiBase} token={token} branch={isLightMode ? undefined : workspaceBranch || undefined} methods={selectedMethods} />
+                  <UnderTheHoodPanel apiBase={apiBase} methods={selectedMethods} />
                 </CollapsibleSection>
               </div>
             ) : null}

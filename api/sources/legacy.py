@@ -95,30 +95,17 @@ def run_legacy(
     profile: SchemaProfile,
     command: str,
     arguments: dict,
-    *,
-    source_root: Path | None = None,
-    source_version: str | None = None,
 ) -> Any:
-    """
-    Run one legacy command in the profile environment and return its result.
-
-    `source_root` makes the script import the schema from that folder (a git
-    worktree in Dev Mode) instead of the installed package; `source_version`
-    is the commit of that worktree and becomes part of the cache key.
-    """
+    """Run one legacy command in the profile environment and return its result, cached per schema version."""
     info = current_schema_info(profile)
-    version = info.version if source_root is None else f"{info.version}-worktree-{source_version or 'unknown'}"
-    cacheable = source_root is None or bool(source_version)
-    path = _cache_path(profile, version, command, arguments)
-    if cacheable and path.is_file():
+    path = _cache_path(profile, info.version, command, arguments)
+    if path.is_file():
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             logger.warning("Ignoring unreadable cache file %s", path)
 
     script_arguments: tuple[str, ...] = (command, json.dumps(arguments, ensure_ascii=False))
-    if source_root is not None:
-        script_arguments = ("--source-root", str(source_root), *script_arguments)
     try:
         payload = run_script(
             profile.environment,
@@ -134,14 +121,13 @@ def run_legacy(
         raise_script_error(profile, exc)
     result = payload["result"]
 
-    if cacheable:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(f".{os.getpid()}.tmp")
-            tmp.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(path)
-        except OSError:
-            logger.warning("Could not write cache file %s", path, exc_info=True)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        logger.warning("Could not write cache file %s", path, exc_info=True)
     return result
 
 
@@ -161,15 +147,10 @@ def list_schema_modules(base_package: str) -> list[dict]:
     return list(result.get("modules") or [])
 
 
-def list_sections(
-    package: str,
-    *,
-    source_root: Path | None = None,
-    source_version: str | None = None,
-) -> list[str]:
+def list_sections(package: str) -> list[str]:
     """List section-like classes defined in the given module."""
     profile = schema_profile_for_package(package)
-    return run_legacy(profile, "sections", {"package": package}, source_root=source_root, source_version=source_version)
+    return run_legacy(profile, "sections", {"package": package})
 
 
 def build_graph(
@@ -180,10 +161,6 @@ def build_graph(
     include_inheritance: bool = True,
     allow_cross_module: bool = True,
     base_namespace: str | None = None,
-    *,
-    extractor: str | None = None,
-    source_root: Path | None = None,
-    source_version: str | None = None,
 ) -> dict:
     """Build the graph JSON for a module, starting at `root` if given."""
     profile = schema_profile_for_package(package, base_namespace)
@@ -196,9 +173,7 @@ def build_graph(
         "allow_cross_module": allow_cross_module,
         "base_namespace": base_namespace,
     }
-    if extractor:
-        arguments["extractor"] = extractor
-    return run_legacy(profile, "graph", arguments, source_root=source_root, source_version=source_version)
+    return run_legacy(profile, "graph", arguments)
 
 
 def get_usage_for_section(section_id: str) -> tuple[UsageEntry, ...]:

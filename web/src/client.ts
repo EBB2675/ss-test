@@ -13,25 +13,12 @@ import { API_FEATURE_HEADER, API_VERSION, API_VERSION_HEADER, DEFAULT_FEATURE_FL
 import { DEFAULT_API, STATIC_MODE } from "./constants/defaults";
 import type { StaticAnswer, StaticBackend } from "./static/backend";
 
-export const TOKEN_KEY = "schema-uml-token";
-
-function storedToken(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return window.localStorage.getItem(TOKEN_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
-/** The headers every request carries: API version, features and, with a token, the login. */
-export function apiHeaders(token: string = storedToken()): Record<string, string> {
-  const headers: Record<string, string> = {
+/** The headers every request carries: API version and features. */
+export function apiHeaders(): Record<string, string> {
+  return {
     [API_VERSION_HEADER]: API_VERSION,
     [API_FEATURE_HEADER]: DEFAULT_FEATURE_FLAGS.join(","),
   };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  return headers;
 }
 
 // ---------- static site ----------
@@ -102,12 +89,12 @@ async function staticAdapter(config: InternalAxiosRequestConfig) {
 // ---------- the client ----------
 
 /** An Axios instance for the backend; paths are relative to `baseURL`. */
-export function createApiClient(baseURL: string = DEFAULT_API, token?: string): AxiosInstance {
+export function createApiClient(baseURL: string = DEFAULT_API): AxiosInstance {
   const instance = axios.create({ baseURL });
   if (STATIC_MODE) instance.defaults.adapter = staticAdapter;
   instance.interceptors.request.use((config) => {
     config.headers = config.headers ?? {};
-    for (const [name, value] of Object.entries(apiHeaders(token ?? ""))) {
+    for (const [name, value] of Object.entries(apiHeaders())) {
       config.headers[name] = value;
     }
     return config;
@@ -116,13 +103,13 @@ export function createApiClient(baseURL: string = DEFAULT_API, token?: string): 
 }
 
 /** `fetch` for a backend path (`/overview?...`), with the API headers added to `init`. */
-export async function apiFetch(path: string, init: RequestInit = {}, options: { baseURL?: string; token?: string } = {}) {
+export async function apiFetch(path: string, init: RequestInit = {}, options: { baseURL?: string } = {}) {
   if (STATIC_MODE) {
     const answer = await answerStatically((init.method || "GET").toUpperCase(), path, undefined, init.body);
     const text = typeof answer.data === "string" ? answer.data : JSON.stringify(answer.data);
     return new Response(text, { status: answer.status, headers: { "Content-Type": answer.contentType ?? "application/json" } });
   }
   const base = (options.baseURL ?? DEFAULT_API).replace(/\/$/, "");
-  const headers = { ...apiHeaders(options.token ?? storedToken()), ...(init.headers as Record<string, string> | undefined) };
+  const headers = { ...apiHeaders(), ...(init.headers as Record<string, string> | undefined) };
   return fetch(`${base}${path}`, { ...init, headers });
 }

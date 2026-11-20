@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Collection
-from pathlib import Path
 
 from ..light_mode.schema_source import SchemaProfile, schema_profile_for_package
 from . import graph, legacy
@@ -30,8 +29,6 @@ logger = logging.getLogger(__name__)
 EXTRACTION_SETTING = "SCHEMA_STUDIO_EXTRACTION"
 EXTRACTION_MODES = ("legacy", "linkml")
 DEFAULT_EXTRACTION = "linkml"
-# The graph builder the legacy path runs by default; any other extractor stays on the legacy path.
-DEFAULT_EXTRACTOR = "extractor.graph_builder:build_graph"
 
 
 def _parse_setting(raw: str) -> dict[str, str]:
@@ -68,10 +65,6 @@ def build_graph(
     allow_cross_module: bool = True,
     base_namespace: str | None = None,
     expand: Collection[str] = (),
-    *,
-    extractor: str | None = None,
-    source_root: Path | None = None,
-    source_version: str | None = None,
 ) -> dict:
     """The graph JSON for a module, starting at `root` if given, from the profile's extraction path.
 
@@ -86,11 +79,9 @@ def build_graph(
         "allow_cross_module": allow_cross_module,
         "base_namespace": base_namespace,
     }
-    if extraction_mode(profile) == "legacy" or (extractor or DEFAULT_EXTRACTOR) != DEFAULT_EXTRACTOR:
-        return legacy.build_graph(
-            package, **flags, extractor=extractor, source_root=source_root, source_version=source_version,
-        )
-    snapshot = get_snapshot(profile, package, source_root=source_root, source_version=source_version)
+    if extraction_mode(profile) == "legacy":
+        return legacy.build_graph(package, **flags)
+    snapshot = get_snapshot(profile, package)
     try:
         return graph.build_graph(snapshot["linkml"], snapshot["extraction"], package, **flags, expand=expand)
     except graph.RootNotFound as exc:

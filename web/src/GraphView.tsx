@@ -3,7 +3,7 @@ import cytoscape from "cytoscape";
 import elk from "elkjs/lib/elk.bundled.js";
 import cytoscapeElk from "cytoscape-elk";
 import type { Core, NodeSingular } from "cytoscape";
-import { useSelection, type QtyMeta, type QtySnapshot } from "./store/selection";
+import { useSelection, type QtyMeta } from "./store/selection";
 import { NOMAD_EDIT_RULES, VOCAB_TERM, type EditRules, type QuantityFormData } from "./components/quantityShared";
 import type { ApiEdge, ApiNode } from "./types/api";
 import type { QuantityNode, UmlClassNode, UmlGraphState } from "./types/uml";
@@ -12,8 +12,6 @@ import { canvasEdges } from "./utils/canvasEdges";
 import { placeNewNodes, subsectionOnly, type PlacedBox, type Point } from "./utils/canvasPlacement";
 import { attachWheelZoom } from "./utils/wheelZoom";
 import { DEFAULT_LAYOUT_DIRECTION, type LayoutDirection } from "./utils/layoutDirection";
-
-type QtyDiffState = "added" | "removed" | "changed" | undefined;
 
 cytoscapeElk(cytoscape, elk);
 
@@ -27,17 +25,11 @@ export type GraphExportHandle = {
   refit: () => void;
 };
 
-type DiffNodes = { added: ApiNode[]; removed: ApiNode[]; changed: { id: string }[] };
-type DiffEdges = { added: ApiEdge[]; removed: ApiEdge[] };
 type CardBox = { x: number; y: number; w: number; h: number };
 
 export type GraphViewProps = {
   nodes: RawNode[];
   edges: RawEdge[];
-  diff?: {
-    nodes: DiffNodes;
-    edges: DiffEdges;
-  } | null;
   onReady?: (handle: GraphExportHandle | null) => void;
   // A new value means a new graph: the canvas lays it out and fits it once. Other
   // changes keep the classes where they are and place only the ones that join.
@@ -186,11 +178,6 @@ const stylesheet = (palette: Palette) => [
   },
   { selector: ".hidden", style: { display: "none" } },
   { selector: ":selected", style: { "border-width": 3, "border-color": "#2563eb" } },
-  { selector: ".diff-added",   style: { "border-color": "#16a34a", "border-width": 4 } },
-  { selector: ".diff-removed", style: { "border-color": "#dc2626", "border-width": 4 } },
-  { selector: ".diff-changed", style: { "border-color": "#ca8a04", "border-width": 4 } },
-  { selector: "edge.diff-added",   style: { "line-color": "#16a34a", "target-arrow-color": "#16a34a", "source-arrow-color": "#16a34a", width: 3 } },
-  { selector: "edge.diff-removed", style: { "line-color": "#dc2626", "target-arrow-color": "#dc2626", "source-arrow-color": "#dc2626", width: 3, "line-style": "dashed" } }
 ] as unknown as cytoscape.StylesheetJson;
 
 const fullLayout = (direction: LayoutDirection) => ({
@@ -262,16 +249,11 @@ const placedBox = (node: NodeSingular): PlacedBox => {
 
 function umlLabel(
   name: string,
-  attrs: { name: string; dtype?: string; shape?: string | null; card?: string | null; diff?: QtyDiffState }[],
+  attrs: { name: string; dtype?: string; shape?: string | null; card?: string | null }[],
   showMetadata: boolean
 ) {
   const attrLines = attrs.map(a => {
-    const parts = [] as string[];
-    if (a.diff === "added") parts.push("🟢 ");
-    if (a.diff === "removed") parts.push("🔴 ");
-    if (a.diff === "changed") parts.push("🟠 ");
-
-    parts.push(a.name);
+    const parts = [a.name];
     const dt = showMetadata ? cleanType(a.dtype) : "";
     if (dt) parts.push(`: ${dt}`);
     if (showMetadata && a.shape && a.shape !== "[]") parts.push(` ${a.shape}`);
@@ -283,7 +265,6 @@ function umlLabel(
 export default function GraphView({
   nodes,
   edges,
-  diff,
   onReady,
   layoutKey,
   onLayoutReady,
@@ -501,50 +482,6 @@ export default function GraphView({
     }
   }, [classDraft, onCreateClass]);
 
-  const quantityDiffs = useMemo(() => {
-    const map = new Map<
-      string,
-      { state: "added" | "removed" | "changed"; before?: RawNode; after?: RawNode }
-    >();
-
-    if (!diff) return map;
-
-    diff.nodes?.added?.forEach((n) => {
-      if (n?.kind === "quantity" && n.id) {
-        map.set(n.id, { state: "added", after: n });
-      }
-    });
-
-    diff.nodes?.removed?.forEach((n) => {
-      if (n?.kind === "quantity" && n.id) {
-        map.set(n.id, { state: "removed", before: n });
-      }
-    });
-
-    diff.nodes?.changed?.forEach((entry) => {
-      const before = (entry as { before?: RawNode | null }).before ?? undefined;
-      const after = (entry as { after?: RawNode | null }).after ?? undefined;
-      const id = entry?.id;
-      const isQuantity = before?.kind === "quantity" || after?.kind === "quantity";
-      if (isQuantity && id) {
-        map.set(id, { state: "changed", before, after });
-      }
-    });
-
-    return map;
-  }, [diff]);
-
-  const graphNodes = useMemo(() => {
-    const base = [...nodes];
-    if (diff?.nodes?.removed?.length) {
-      diff.nodes.removed.forEach((n) => {
-        if (!n?.id || (n?.kind !== "section" && n?.kind !== "quantity")) return;
-        base.push(n as RawNode);
-      });
-    }
-    return base;
-  }, [nodes, diff]);
-
   const resolvedEdges = useMemo<RawEdge[]>(() => {
     if (umlState?.edges?.length) {
       return umlState.edges
@@ -573,22 +510,11 @@ export default function GraphView({
     const sections = new Map<string, RawNode>();
     const attrs = new Map<
       string,
-      { name: string; dtype?: string; shape?: string | null; card?: string | null; diff?: QtyDiffState }[]
+      { name: string; dtype?: string; shape?: string | null; card?: string | null }[]
     >();
     const qByOwner = new Map<string, QtyMeta[]>();
 
-    const buildSnapshot = (n?: RawNode | null): QtySnapshot | undefined => {
-      if (!n) return undefined;
-      return {
-        name: n.label,
-        dtype: n.dtype ?? n.data_type ?? n.type ?? undefined,
-        shape: n.shape ?? undefined,
-        card: n.card ?? undefined,
-        doc: n.doc ?? undefined,
-      };
-    };
-
-    for (const n of graphNodes) {
+    for (const n of nodes) {
       if (n.kind === "section") {
         sections.set(n.id, n);
         attrs.set(n.id, attrs.get(n.id) ?? []);
@@ -596,10 +522,8 @@ export default function GraphView({
       }
     }
 
-    for (const q of graphNodes) {
+    for (const q of nodes) {
       if (q.kind !== "quantity" || !q.owner) continue;
-
-      const diffInfo = quantityDiffs.get(q.id);
 
       // For UML card display
       const list = attrs.get(q.owner) ?? [];
@@ -608,7 +532,6 @@ export default function GraphView({
         dtype: q.dtype ?? q.data_type ?? q.type ?? undefined,
         shape: q.shape ?? undefined,
         card: q.card ?? undefined,
-        diff: diffInfo?.state,
       });
       attrs.set(q.owner, list);
 
@@ -625,13 +548,6 @@ export default function GraphView({
         line: typeof q.line === "number" ? q.line : undefined,
         owner: q.owner,
         details: q.details ?? null,
-        diff: diffInfo
-          ? {
-              state: diffInfo.state,
-              before: buildSnapshot(diffInfo.before),
-              after: buildSnapshot(diffInfo.after),
-            }
-          : undefined,
       });
       qByOwner.set(q.owner, metaList);
     }
@@ -665,7 +581,6 @@ export default function GraphView({
             dtype: q.dtype,
             shape: q.shape ?? undefined,
             card: q.card ?? undefined,
-            diff: undefined,
           }))
         );
         qByOwner.set(
@@ -675,51 +590,7 @@ export default function GraphView({
       });
     }
 
-    // Also surface removed quantities so they appear in the DocPanel list
-    for (const [qid, diffInfo] of quantityDiffs.entries()) {
-      if (diffInfo.state !== "removed") continue;
-      const owner = diffInfo.before?.owner;
-      if (!owner || !sections.has(owner)) continue;
-
-      const metaList = qByOwner.get(owner) ?? [];
-      metaList.push({
-        id: qid,
-        name: diffInfo.before?.label || qid.split(".").pop() || qid,
-        dtype:
-          diffInfo.before?.dtype ?? diffInfo.before?.data_type ?? diffInfo.before?.type ?? undefined,
-        shape: diffInfo.before?.shape ?? undefined,
-        card: diffInfo.before?.card ?? undefined,
-        doc: diffInfo.before?.doc ?? undefined,
-        owner,
-        diff: {
-          state: "removed",
-          before: buildSnapshot(diffInfo.before),
-        },
-      });
-      qByOwner.set(owner, metaList);
-    }
-
     const baseEdges = canvasEdges(resolvedEdges);
-    if (diff?.edges?.removed?.length) {
-      const removedEdges: RawEdge[] = [];
-      diff.edges.removed.forEach((e) => {
-        if (!e?.source || !e?.target) return;
-        const type = (e.type as RawEdge["type"]) ?? "hasSubSection";
-        removedEdges.push({
-          source: e.source,
-          target: e.target,
-          type,
-          card: e.card ?? undefined
-        });
-      });
-      // Removed edges are thinned out against the graph as it was before the change.
-      const edgeKey = (e: RawEdge) => `${e.source}|${e.target}|${e.type}`;
-      const added = new Set((diff.edges.added ?? []).map(edgeKey));
-      const before = [...resolvedEdges.filter((e) => !added.has(edgeKey(e))), ...removedEdges];
-      const keptBefore = new Set(canvasEdges(before).map(edgeKey));
-      baseEdges.push(...removedEdges.filter((e) => keptBefore.has(edgeKey(e))));
-    }
-
     const umlEdges = baseEdges.filter((e) => {
       if (e.type === "hasSubSection") return true;
       if (e.type === "inherits") return showInheritance;
@@ -727,7 +598,7 @@ export default function GraphView({
     });
 
     return { sectionsMap: sections, attrsMap: attrs, umlEdges, quantitiesByOwner: qByOwner };
-  }, [graphNodes, resolvedEdges, quantityDiffs, diff, showInheritance, classCards, toQtyMeta, umlState]);
+  }, [nodes, resolvedEdges, showInheritance, classCards, toQtyMeta, umlState]);
 
   const keyedEdges = useMemo(() => keyEdges(umlEdges), [umlEdges]);
 
@@ -983,32 +854,6 @@ export default function GraphView({
       }
     });
 
-    const diffClasses = "diff-added diff-removed diff-changed";
-    cy.nodes().removeClass(diffClasses);
-    cy.edges().removeClass(diffClasses);
-    if (diff) {
-      const addedIds   = new Set(diff.nodes?.added?.map((n) => n.id));
-      const removedIds = new Set(diff.nodes?.removed?.map((n) => n.id));
-      const changedIds = new Set(diff.nodes?.changed?.map((c) => c.id));
-
-      cy.nodes().forEach((n) => {
-        const id = n.id();
-        if (addedIds.has(id))   n.addClass("diff-added");
-        if (removedIds.has(id)) n.addClass("diff-removed");
-        if (changedIds.has(id)) n.addClass("diff-changed");
-      });
-
-      const edgeKey = (e: ApiEdge) => `${e.source}|${e.target}|${e.type ?? ""}`;
-      const addedE   = new Set(diff.edges?.added?.map(edgeKey));
-      const removedE = new Set(diff.edges?.removed?.map(edgeKey));
-
-      cy.edges().forEach(e => {
-        const k = `${e.data("source")}|${e.data("target")}|${e.data("type") || ""}`;
-        if (addedE.has(k))   e.addClass("diff-added");
-        if (removedE.has(k)) e.addClass("diff-removed");
-      });
-    }
-
     laidOutKeyRef.current = layoutKey;
     laidOutDirectionRef.current = layoutDirection;
     syncAllCardBoxes();
@@ -1088,7 +933,7 @@ export default function GraphView({
       });
     }
     syncAllCardBoxes();
-  }, [canvasElements, diff, layoutKey, layoutDirection, syncAllCardBoxes]);
+  }, [canvasElements, layoutKey, layoutDirection, syncAllCardBoxes]);
 
   const cardViews = useMemo(
     () =>

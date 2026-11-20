@@ -1,31 +1,24 @@
 """Edits on the server: the snapshot of a module, with the stored edits replayed by `core`.
 
-Shared by Light and Dev Mode, which store edits differently (SQLite,
-MongoDB); here an edit is the plain dict of `edits.py` plus the module it is
-stored under (`package`). The edited LinkML schema is the truth: graphs, roots,
+Light Mode stores edits in SQLite; here an edit is the plain dict of
+`edits.py` plus the module it is stored under (`package`). The edited LinkML schema is the truth: graphs, roots,
 usage and the LinkML download all read it. How edits replay, which module
 owns an edit and the empty canvas are described in `core.py`; this module
 finds the snapshots and keeps the legacy extraction path working.
-
-Dev Mode reads a branch from a git worktree (`Source`); the graph, roots, the
-LinkML download and new edits then all use that branch's snapshot.
 """
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from ..light_mode.schema_source import SchemaProfile, schema_profile_for_package
 from . import core
 from . import edits as edit_ops
 from . import graph
-from .extraction import DEFAULT_EXTRACTOR
 from .extraction import build_graph as extracted_graph
 from .extraction import extraction_mode, get_usage_for_section
 from .extraction import list_sections as extracted_sections
-from .legacy import UnknownRoot, UsageEntry
+from .legacy import UnknownRoot
 from .snapshots import get_snapshot, snapshot_yaml
 
 SCRATCH_SUFFIX = core.SCRATCH_SUFFIX
@@ -39,14 +32,6 @@ EditError = edit_ops.EditError
 
 class EditsUnavailable(RuntimeError):
     """The profile is on the legacy extraction path, which has no LinkML schema to edit."""
-
-
-@dataclass(frozen=True)
-class Source:
-    """A git worktree to read the schema from instead of the installed package (Dev Mode branches)."""
-
-    root: Path
-    sha: str | None = None
 
 
 def rules_summary(profile: SchemaProfile) -> dict[str, Any]:
@@ -64,11 +49,8 @@ def _require_editable(profile: SchemaProfile) -> None:
         )
 
 
-def _snapshot(profile: SchemaProfile, package: str, source: Source | None) -> dict[str, Any]:
-    scope = core.snapshot_scope(profile, package)
-    if source is None:
-        return get_snapshot(profile, scope)
-    return get_snapshot(profile, scope, source_root=source.root, source_version=source.sha)
+def _snapshot(profile: SchemaProfile, package: str) -> dict[str, Any]:
+    return get_snapshot(profile, core.snapshot_scope(profile, package))
 
 
 def edited(
@@ -76,7 +58,6 @@ def edited(
     stored: Sequence[Mapping[str, Any]] = (),
     *,
     base_namespace: str | None = None,
-    source: Source | None = None,
 ) -> Edited:
     """The module's snapshot (the whole profile's for the empty canvas) with the profile's edits replayed.
 
@@ -85,8 +66,7 @@ def edited(
     """
     profile = schema_profile_for_package(package, base_namespace)
     _require_editable(profile)
-    snapshot = _snapshot(profile, package, source)
-    return core.edited(profile, snapshot, package, stored, commit=source.sha if source is not None else None)
+    return core.edited(profile, _snapshot(profile, package), package, stored)
 
 
 def _unsupported(stored: Sequence[Mapping[str, Any]], profile: SchemaProfile, package: str) -> list[dict[str, Any]]:
@@ -107,14 +87,10 @@ def build_graph(
     base_namespace: str | None = None,
     empty: bool = False,
     expand: Collection[str] = (),
-    source: Source | None = None,
-    extractor: str | None = None,
 ) -> dict[str, Any]:
     """The module's graph from its edited schema, with `applied_edits` and `edit_conflicts` when there are any.
 
     `empty` starts the graph only from classes the edits added to the module.
-    A custom `extractor` (Dev Mode) builds the graph on the legacy path, where
-    edits do not apply.
     """
     profile = schema_profile_for_package(package, base_namespace)
     flags = {
@@ -125,17 +101,15 @@ def build_graph(
         "allow_cross_module": allow_cross_module,
         "base_namespace": base_namespace,
     }
-    custom = (extractor or DEFAULT_EXTRACTOR) != DEFAULT_EXTRACTOR
-    if custom or not editable(profile):
+    if not editable(profile):
         if empty:
             result: dict[str, Any] = {"package": package, "root": root, "nodes": [], "edges": []}
         else:
-            located = {} if source is None else {"source_root": source.root, "source_version": source.sha}
-            result = extracted_graph(package, **flags, expand=expand, extractor=extractor, **located)
+            result = extracted_graph(package, **flags, expand=expand)
         conflicts: list[dict[str, Any]] = _unsupported(stored, profile, package)
         applied: list[Mapping[str, Any]] = []
     else:
-        state = edited(package, stored, base_namespace=base_namespace, source=source)
+        state = edited(package, stored, base_namespace=base_namespace)
         try:
             return core.build_graph(state, package, empty=empty, expand=expand, **{**flags, "root": root})
         except graph.RootNotFound as exc:
@@ -147,38 +121,25 @@ def build_graph(
     return result
 
 
-def list_sections(
-    package: str, stored: Sequence[Mapping[str, Any]] = (), *, source: Source | None = None,
-) -> list[str]:
+def list_sections(package: str, stored: Sequence[Mapping[str, Any]] = ()) -> list[str]:
     """The roots a module offers, edits included."""
     profile = schema_profile_for_package(package)
-    if not editable(profile) or (not stored and not is_scratch(package) and source is None):
+    if not editable(profile) or (not stored and not is_scratch(package)):
         return extracted_sections(package)
-    state = edited(package, stored, source=source)
+    state = edited(package, stored)
     return core.section_names(state, package)
 
 
-def usage_for_section(
-    section_id: str, package: str | None, stored: Sequence[Mapping[str, Any]] = (), *, source: Source | None = None,
-) -> tuple:
-    """Usage info of a section; a class an edit renamed keeps the usage of its source class.
-
-    With a `source` (Dev Mode branch) it comes from the branch's snapshots:
-    the module's, or the whole profile's when the module does not hold the class.
-    """
-    state = None
-    if package and (stored or source is not None):
+def usage_for_section(section_id: str, package: str | None, stored: Sequence[Mapping[str, Any]] = ()) -> tuple:
+    """Usage info of a section; a class an edit renamed keeps the usage of its source class."""
+    if package and stored:
         profile = schema_profile_for_package(package)
         if editable(profile):
-            state = edited(package, stored, source=source)
-            source_id = core.usage_source(state, section_id)
+            source_id = core.usage_source(edited(package, stored), section_id)
             if source_id is None:
                 return ()
             section_id = source_id
-    if source is None or state is None:
-        return get_usage_for_section(section_id, package)
-    snapshots = (state.snapshot, _snapshot(state.profile, state.profile.default_base_namespace, source))
-    return tuple(UsageEntry(**entry) for entry in core.usage_entries(snapshots, section_id))
+    return get_usage_for_section(section_id, package)
 
 
 def prepare(
@@ -187,14 +148,13 @@ def prepare(
     requests: Sequence[Mapping[str, Any]],
     *,
     base_namespace: str | None = None,
-    source: Source | None = None,
 ) -> list[dict[str, Any]]:
     """New edits (`op`, `target`, `payload`), checked in order on top of the stored ones; raises `EditError`.
 
     All of them apply or none: an error in one leaves nothing to store. Each
     edit gets the module it is to be stored under (`package`).
     """
-    state = edited(package, stored, base_namespace=base_namespace, source=source)
+    state = edited(package, stored, base_namespace=base_namespace)
     return core.prepare(state, package, requests)
 
 
@@ -205,16 +165,15 @@ def root_after(
     root: str | None,
     *,
     base_namespace: str | None = None,
-    source: Source | None = None,
 ) -> str | None:
     """The root a graph can use once new edits apply: renamed with its class, or none when the class is gone."""
     if not root:
         return root
-    state = edited(package, stored, base_namespace=base_namespace, source=source)
+    state = edited(package, stored, base_namespace=base_namespace)
     return core.root_after(state, package, prepared, root)
 
 
-def linkml_yaml(package: str, stored: Sequence[Mapping[str, Any]] = (), *, source: Source | None = None) -> str:
+def linkml_yaml(package: str, stored: Sequence[Mapping[str, Any]] = ()) -> str:
     """The module's LinkML schema as YAML, with the stored edits replayed onto it.
 
     Without edits, or on the legacy extraction path (which has nothing to
@@ -222,12 +181,12 @@ def linkml_yaml(package: str, stored: Sequence[Mapping[str, Any]] = (), *, sourc
     """
     profile = schema_profile_for_package(package)
     if not stored or not editable(profile):
-        return snapshot_yaml(_snapshot(profile, package, source))
-    return core.edited_yaml(edited(package, stored, source=source))
+        return snapshot_yaml(_snapshot(profile, package))
+    return core.edited_yaml(edited(package, stored))
 
 
 __all__ = [
-    "Edited", "EditError", "EditsUnavailable", "SCRATCH_SUFFIX", "Source", "build_graph", "edited", "editable",
+    "Edited", "EditError", "EditsUnavailable", "SCRATCH_SUFFIX", "build_graph", "edited", "editable",
     "is_scratch", "linkml_yaml", "list_sections", "prepare", "root_after", "rules_summary", "snapshot_commit",
     "usage_for_section", "with_stored",
 ]

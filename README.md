@@ -4,7 +4,6 @@ Interactive schema explorer and editor for data models.
 
 `schema-studio` (the package entrypoint) launches **Light Mode** by default:
 - Local single-user app (no auth)
-- No MongoDB/Redis required
 - Custom edits persisted in local SQLite
 - Schema family selectable between `nomad-simulations`, `nomad-measurements`, `bam-masterdata v0` and `bam-masterdata v1`
 
@@ -102,17 +101,6 @@ This starts the local server on `http://127.0.0.1:5179` and opens your browser a
 - JSON export and PDF snapshot export
 - Optional **Send Design** action when `SCHEMA_STUDIO_SEND_ENDPOINT` is configured
 
-## Light Mode vs Dev Mode
-
-| Capability | Light Mode (current) | Dev Mode (source/full stack) |
-|---|---|---|
-| Install path | `pip install -e .` | Clone repo + Docker/local services |
-| Auth | No | Yes |
-| Multi-user | No | Yes |
-| Branch switching/diff | No | Yes |
-| Persistence | Local SQLite | MongoDB |
-| Background jobs | Not required | Celery + Redis |
-
 ## Optional Configuration
 
 Make sure to set the environment variables before running `schema-studio`.
@@ -126,7 +114,7 @@ Make sure to set the environment variables before running `schema-studio`.
 | `SCHEMA_STUDIO_DEFAULT_NAMESPACE` | `nomad_simulations.schema_packages` | Initial base namespace |
 | `SCHEMA_STUDIO_ENVIRONMENTS_DIR` | `environments/` in the checkout | Folder that holds the schema environments |
 | `SCHEMA_STUDIO_EXTRACTOR_TIMEOUT_SECONDS` | `300` | Time limit for one schema read in an environment |
-| `SCHEMA_STUDIO_EXTRACTION` | `linkml` | How graphs, roots and usage info are built: `linkml` (from the LinkML snapshot) or `legacy` (graph builder in the schema environment). One value for all profiles, or per profile, e.g. `nomad-simulations=legacy` or `bam-masterdata-v0=legacy`; profiles not named use `linkml`. Dev Mode reads it for graphs (including branch graphs), roots and usage; its overview and package list scan the git worktree instead. |
+| `SCHEMA_STUDIO_EXTRACTION` | `linkml` | How graphs, roots and usage info are built: `linkml` (from the LinkML snapshot) or `legacy` (graph builder in the schema environment). One value for all profiles, or per profile, e.g. `nomad-simulations=legacy` or `bam-masterdata-v0=legacy`; profiles not named use `linkml`. |
 | `SCHEMA_STUDIO_SEND_ENDPOINT` | unset | Enable `POST /send-design` passthrough |
 | `SCHEMA_STUDIO_DIST_DIR` | auto-detected | Override frontend static assets directory |
 | `UVICORN_LOG_LEVEL` | `info` | Server logging level |
@@ -152,18 +140,6 @@ Version info endpoint:
 
 ## Common Issues
 
-### `405 Method Not Allowed` when building graph
-You are likely using a Dev Mode frontend build with a Light Mode backend.
-
-Fix:
-```bash
-VITE_LIGHT_MODE=true npm --prefix web run build
-```
-Then restart `schema-studio`.
-
-### `GET /git/branches` returns `410`
-Expected in Light Mode. Branch switching is intentionally disabled.
-
 ### A schema family shows "not loaded" or requests answer `503`
 Its environment is not set up yet. Set it up as described in
 [Set up the schema environments](#2-set-up-the-schema-environments), or run schema update once:
@@ -174,28 +150,13 @@ curl -X POST "http://127.0.0.1:5179/schema/update?profile=nomad-simulations"
 ### `ImportError: cannot import name 'model_validator'`
 You are likely on an older Pydantic install. Use a clean Python 3.11+ environment and reinstall.
 
-## Dev Mode (Full Stack) Quick Start
-
-Use this if you need auth, multi-user, branch diff, Mongo, and Celery.
-
-```bash
-git clone https://github.com/EBB2675/schema-studio.git
-cd schema-studio
-cp .env.example .env
-# set SCHEMA_UML_REPO_HOST, SCHEMA_UML_SECRET, SCHEMA_UML_PW_SALT
-# SCHEMA_PROFILES lists the schema environments built into the API image
-docker compose up --build -d
-```
-
-Open `https://localhost`.
-
 ## Local Source Development Notes
 
-- Backend deps: `api/requirements.txt`
+- Backend deps: `pyproject.toml`
 - Source installs use bundled Light Mode static assets by default, so end users do not need a frontend build.
 - If you change frontend code and want to ship those updates in Light Mode, refresh bundled static assets:
   ```bash
-  VITE_LIGHT_MODE=true npm --prefix web run build
+  npm --prefix web run build
   ./scripts/sync_light_mode_static.sh
   ```
 - Then install/run:
